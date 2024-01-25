@@ -12,11 +12,73 @@ class QLabelFramed(QtWidgets.QLabel):
         self.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
+class ManualControlWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None, coordinate = '_'):
+        super(ManualControlWidget, self).__init__(parent)
+        layout = QtWidgets.QGridLayout()
+
+        self.radioButton = QtWidgets.QRadioButton(parent=parent)
+        self.step_label = QtWidgets.QLabel(parent=parent)
+        self.step_textEdit = QtWidgets.QLineEdit(parent=parent)
+        self.step_textEdit.setMaximumSize(QtCore.QSize(40, 30))
+        self.horizontalSlider = QtWidgets.QSlider(parent=parent)
+        self.horizontalSlider.setMaximum(100)
+        self.horizontalSlider.setProperty("value", 50)
+        self.horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        self.horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        self.man_label = QtWidgets.QLabel(parent=parent)
+        self.man_textEdit = QtWidgets.QLineEdit(parent=parent)
+        self.man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
+        self.pos_fdbk_label = QLabelFramed(parent=parent)
+        self.dlabel = QtWidgets.QLabel(parent=parent)
+        self.dfdbk_label = QtWidgets.QLabel(parent=parent)
+        self.dfdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        self.dfdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        self.dfdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        self.step_label.setText(f"s{coordinate}")
+        self.man_label.setText(f"{coordinate}man")
+        self.pos_fdbk_label.setText("TextLabel")
+        self.dfdbk_label.setText("TextLabel")
+        self.radioButton.setText(coordinate)
+        self.dlabel.setText("d"+coordinate)
+
+        layout.addWidget(self.radioButton, 0, 0, 1, 1)
+        layout.addWidget(self.step_label, 0, 1, 1, 1)
+        layout.addWidget(self.step_textEdit, 0, 2, 1, 1)
+        layout.addWidget(self.horizontalSlider, 0, 3, 1, 1)
+        layout.addWidget(self.man_label, 0, 4, 1, 1)
+        layout.addWidget(self.man_textEdit, 0, 5, 1, 1)
+        layout.addWidget(self.pos_fdbk_label, 0, 6, 1, 1)
+        layout.addWidget(self.dlabel, 0, 7, 1, 1)
+        layout.addWidget(self.dfdbk_label, 0, 8, 1, 1)
+
+        self.radioButton.toggled.connect(self.radio_button_check)
+
+        self.setLayout(layout)
+
+        self.widget_touple = (self.radioButton,
+        self.step_label,
+        self.step_textEdit,
+        self.horizontalSlider,
+        self.man_label,
+        self.man_textEdit,
+        self.pos_fdbk_label,
+        self.dlabel,
+        self.dfdbk_label)
+
+        for w in self.widget_touple[1:]:
+            w.setEnabled(False)
+        
+    def getwidgets(self):
+        return self.widget_touple
+
+    def radio_button_check(self):
+        for w in self.widget_touple[1:]:
+            w.setEnabled(self.widget_touple[0].isChecked())
 
 class MainWindow(QtWidgets.QMainWindow):
-    # pylint: disable=attribute-defined-outside-init
     def __init__(self, *args, obj=None, **kwargs):
-        # pylint: disable=attribute-defined-outside-init
         super(MainWindow, self).__init__(*args, **kwargs)
         self.setupUi(self)
 
@@ -78,14 +140,11 @@ class MainWindow(QtWidgets.QMainWindow):
     # def initialize_manualCTab(self):
         
     def setupUi(self, MainWindow):
-        MainWindow.resize(1624, 791)
+        # MainWindow.resize(1624, 791)
 
         self.figure = Figure(figsize=(5, 4), dpi=100)
         self.canvas = FigureCanvas(self.figure)
         self.toolbar = NavigationToolbar(self.canvas, self)
-
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, QtWidgets.QSizePolicy.Policy.MinimumExpanding)
-
 
         MainWindow.setDockOptions(QtWidgets.QMainWindow.DockOption.AllowTabbedDocks|QtWidgets.QMainWindow.DockOption.AnimatedDocks|QtWidgets.QMainWindow.DockOption.VerticalTabs)
         self.centralwidget = QtWidgets.QWidget(parent=MainWindow)
@@ -102,232 +161,245 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.manualCTab = QtWidgets.QWidget()
 
+
         self.gridLayout_4 = QtWidgets.QGridLayout(self.manualCTab)
         self.man_main_VLayout = QtWidgets.QVBoxLayout()
         self.man_move_gridLayout = QtWidgets.QGridLayout()
 
-        setattr(self,"x_step_textEdit",QtWidgets.QTextEdit(parent=self.manualCTab))
 
-        self.dz_fdbk_label = QLabelFramed(parent=self.manualCTab)
-        # self.x_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-        self.x_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
-        self.c_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
-        self.c_horizontalSlider.setMaximum(100)
-        self.c_horizontalSlider.setProperty("value", 50)
-        self.c_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.c_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-        self.z_pos_fdbk_label = QLabelFramed(parent=self.manualCTab)
+        # for coord in {'x','y','z','a','b','c'}:
+        #     setattr(self, f"{coord}_step_textEdit", QtWidgets.QTextEdit(parent=self.manualCTab))
+        #     eval(f"self.{coord}_step_textEdit").setMinimumSize(QtCore.QSize(30, 30))
 
 
-        self.man_move_gridLayout.addWidget(self.dz_fdbk_label, 3, 8, 1, 1)
-        self.man_move_gridLayout.addWidget(self.x_step_textEdit, 1, 2, 1, 1)
-        self.man_move_gridLayout.addWidget(self.c_horizontalSlider, 6, 3, 1, 1)
-        self.man_move_gridLayout.addWidget(self.z_pos_fdbk_label, 3, 6, 1, 1)
-        self.x_man_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.x_man_label, 1, 4, 1, 1)
-        self.y_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
-        self.y_horizontalSlider.setMaximum(100)
-        self.y_horizontalSlider.setProperty("value", 50)
-        self.y_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.y_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-        self.man_move_gridLayout.addWidget(self.y_horizontalSlider, 2, 3, 1, 1)
-        self.z_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
 
-        self.man_move_gridLayout.addWidget(self.z_radioButton, 3, 0, 1, 1)
-        self.dz_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.dz_label, 3, 7, 1, 1)
+        # self.dz_fdbk_label = QLabelFramed(parent=self.manualCTab)
+        # # self.x_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.x_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
+        # self.c_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
+        # self.c_horizontalSlider.setMaximum(100)
+        # self.c_horizontalSlider.setProperty("value", 50)
+        # self.c_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        # self.c_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        # self.z_pos_fdbk_label = QLabelFramed(parent=self.manualCTab)
+
+        #
+        # self.man_move_gridLayout.addWidget(self.dz_fdbk_label, 3, 8, 1, 1)
+        # self.man_move_gridLayout.addWidget(self.x_step_textEdit, 1, 2, 1, 1)
+        # self.man_move_gridLayout.addWidget(self.c_horizontalSlider, 6, 3, 1, 1)
+        # self.man_move_gridLayout.addWidget(self.z_pos_fdbk_label, 3, 6, 1, 1)
+        # self.x_man_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.x_man_label, 1, 4, 1, 1)
+        # self.y_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
+        # self.y_horizontalSlider.setMaximum(100)
+        # self.y_horizontalSlider.setProperty("value", 50)
+        # self.y_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        # self.y_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        # self.man_move_gridLayout.addWidget(self.y_horizontalSlider, 2, 3, 1, 1)
+        # self.z_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
+
+        # self.man_move_gridLayout.addWidget(self.z_radioButton, 3, 0, 1, 1)
+        # self.dz_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.dz_label, 3, 7, 1, 1)
         self.man_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_pos_fdbk_label.setMaximumSize(QtCore.QSize(16777215, 30))
-
         self.man_pos_fdbk_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_pos_fdbk_label, 0, 6, 1, 1)
-        self.a_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
-        self.a_horizontalSlider.setMaximum(100)
-        self.a_horizontalSlider.setProperty("value", 50)
-        self.a_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.a_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-        self.man_move_gridLayout.addWidget(self.a_horizontalSlider, 4, 3, 1, 1)
-        self.da_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.da_label, 4, 7, 1, 1)
-        self.a_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.a_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
+        # self.a_horizontalSlider.setMaximum(100)
+        # self.a_horizontalSlider.setProperty("value", 50)
+        # self.a_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        # self.a_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        # self.man_move_gridLayout.addWidget(self.a_horizontalSlider, 4, 3, 1, 1)
+        # self.da_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.da_label, 4, 7, 1, 1)
+        # self.a_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
 
-        self.a_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
-        self.man_move_gridLayout.addWidget(self.a_step_textEdit, 4, 2, 1, 1)
-        self.b_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
-        self.b_horizontalSlider.setMaximum(100)
-        self.b_horizontalSlider.setProperty("value", 50)
-        self.b_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.b_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-        self.man_move_gridLayout.addWidget(self.b_horizontalSlider, 5, 3, 1, 1)
-        self.dx_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.dx_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.dx_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.dx_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.dx_fdbk_label, 1, 8, 1, 1)
-        self.z_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
-        self.z_horizontalSlider.setMaximum(100)
-        self.z_horizontalSlider.setProperty("value", 50)
-        self.z_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.z_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-        self.man_move_gridLayout.addWidget(self.z_horizontalSlider, 3, 3, 1, 1)
-        self.x_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
+        # self.a_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
+        # self.man_move_gridLayout.addWidget(self.a_step_textEdit, 4, 2, 1, 1)
+        # self.b_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
+        # self.b_horizontalSlider.setMaximum(100)
+        # self.b_horizontalSlider.setProperty("value", 50)
+        # self.b_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        # self.b_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        # self.man_move_gridLayout.addWidget(self.b_horizontalSlider, 5, 3, 1, 1)
+        # self.dx_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.dx_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.dx_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.dx_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.dx_fdbk_label, 1, 8, 1, 1)
+        # self.z_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
+        # self.z_horizontalSlider.setMaximum(100)
+        # self.z_horizontalSlider.setProperty("value", 50)
+        # self.z_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        # self.z_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        # self.man_move_gridLayout.addWidget(self.z_horizontalSlider, 3, 3, 1, 1)
+        # self.x_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
 
-        self.man_move_gridLayout.addWidget(self.x_radioButton, 1, 0, 1, 1)
-        self.y_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-
-        self.y_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
-        self.man_move_gridLayout.addWidget(self.y_step_textEdit, 2, 2, 1, 1)
-        self.z_step_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.z_step_label, 3, 1, 1, 1)
-        self.y_man_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.y_man_label, 2, 4, 1, 1)
-        self.z_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-
-        self.z_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
-        self.man_move_gridLayout.addWidget(self.z_step_textEdit, 3, 2, 1, 1)
-        self.b_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-
-        self.b_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
-        self.man_move_gridLayout.addWidget(self.b_step_textEdit, 5, 2, 1, 1)
+        # self.man_move_gridLayout.addWidget(self.x_radioButton, 1, 0, 1, 1)
+        # self.y_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        #
+        # self.y_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
+        # self.man_move_gridLayout.addWidget(self.y_step_textEdit, 2, 2, 1, 1)
+        # self.z_step_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.z_step_label, 3, 1, 1, 1)
+        # self.y_man_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.y_man_label, 2, 4, 1, 1)
+        # self.z_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        #
+        # self.z_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
+        # self.man_move_gridLayout.addWidget(self.z_step_textEdit, 3, 2, 1, 1)
+        # self.b_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        #
+        # self.b_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
+        # self.man_move_gridLayout.addWidget(self.b_step_textEdit, 5, 2, 1,
         self.man_step_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_step_label.setMaximumSize(QtCore.QSize(16777215, 30))
-
         self.man_step_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_step_label, 0, 2, 1, 1)
-        self.c_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.c_step_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        #
+        # self.c_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
+        # self.man_move_gridLayout.addWidget(self.c_step_textEdit, 6, 2, 1, 1)
+        # self.x_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.x_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.x_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.x_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.x_pos_fdbk_label, 1, 6, 1, 1)
+        # self.y_step_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.y_step_label, 2, 1, 1, 1)
+        # self.b_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
+        #
+        # self.man_move_gridLayout.addWidget(self.b_radioButton, 5, 0, 1, 1)
+        # self.a_step_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.a_step_label, 4, 1, 1, 1)
+        # self.dc_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.dc_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.dc_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.dc_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.dc_fdbk_label, 6, 8, 1, 1)
+        # self.c_step_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.c_step_label, 6, 1, 1, 1)
+        # self.b_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.b_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.b_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.b_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.b_pos_fdbk_label, 5, 6, 1, 1)
+        # self.c_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.c_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.c_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.c_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.c_pos_fdbk_label, 6, 6, 1, 1)
+        # self.y_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.y_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.y_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.y_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.y_pos_fdbk_label, 2, 6, 1, 1)
+        # self.a_man_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.a_man_label, 4, 4, 1, 1)
+        # self.x_step_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.x_step_label, 1, 1, 1, 1)
+        # self.c_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
 
-        self.c_step_textEdit.setMaximumSize(QtCore.QSize(30, 30))
-        self.man_move_gridLayout.addWidget(self.c_step_textEdit, 6, 2, 1, 1)
-        self.x_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.x_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.x_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.x_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.x_pos_fdbk_label, 1, 6, 1, 1)
-        self.y_step_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.y_step_label, 2, 1, 1, 1)
-        self.b_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
+        # self.coordinate_radio_buttons = QtWidgets.QButtonGroup()
+        coordinates_list = ["X", "Y", "Z", "A", "B", "C", "T"]
+        for ic, coord in enumerate(coordinates_list):
+            setattr(self, f"manual_control_{coord}", ManualControlWidget(parent = self.manualCTab, coordinate= coord))
+            for iw, widget in enumerate(eval(f"self.manual_control_{coord}").getwidgets()):
+                self.man_move_gridLayout.addWidget(widget, 1+ic,iw,1,1)
+            # self.man_move_gridLayout.addWidget(eval(f"self.manual_control_{coord}"))
+            # self.coordinate_radio_buttons.addButton(eval(f"self.manual_control_{coord}").radioButton)
 
-        self.man_move_gridLayout.addWidget(self.b_radioButton, 5, 0, 1, 1)
-        self.a_step_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.a_step_label, 4, 1, 1, 1)
-        self.dc_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.dc_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.dc_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.dc_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.dc_fdbk_label, 6, 8, 1, 1)
-        self.c_step_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.c_step_label, 6, 1, 1, 1)
-        self.b_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.b_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.b_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.b_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.b_pos_fdbk_label, 5, 6, 1, 1)
-        self.c_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.c_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.c_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.c_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.c_pos_fdbk_label, 6, 6, 1, 1)
-        self.y_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.y_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.y_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.y_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.y_pos_fdbk_label, 2, 6, 1, 1)
-        self.a_man_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.a_man_label, 4, 4, 1, 1)
-        self.x_step_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.x_step_label, 1, 1, 1, 1)
-        self.c_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
-
-        self.man_move_gridLayout.addWidget(self.c_radioButton, 6, 0, 1, 1)
-        self.dy_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.dy_label, 2, 7, 1, 1)
-        self.a_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.a_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.a_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.a_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.a_pos_fdbk_label, 4, 6, 1, 1)
-        self.c_man_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.c_man_label, 6, 4, 1, 1)
-        self.db_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.db_label, 5, 7, 1, 1)
-        self.x_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
-        self.x_horizontalSlider.setMaximum(100)
-        self.x_horizontalSlider.setProperty("value", 50)
-        self.x_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.x_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-        self.man_move_gridLayout.addWidget(self.x_horizontalSlider, 1, 3, 1, 1)
-        self.b_step_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.b_step_label, 5, 1, 1, 1)
-        self.dy_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.dy_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.dy_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.dy_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.dy_fdbk_label, 2, 8, 1, 1)
-        self.y_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
-
-        self.man_move_gridLayout.addWidget(self.y_radioButton, 2, 0, 1, 1)
+        # self.man_move_gridLayout.addWidget(self.c_radioButton, 6, 0, 1, 1)
+        # self.dy_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.dy_label, 2, 7, 1, 1)
+        # self.a_pos_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.a_pos_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.a_pos_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.a_pos_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.a_pos_fdbk_label, 4, 6, 1, 1)
+        # self.c_man_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.c_man_label, 6, 4, 1, 1)
+        # self.db_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.db_label, 5, 7, 1, 1)
+        # self.x_horizontalSlider = QtWidgets.QSlider(parent=self.manualCTab)
+        # self.x_horizontalSlider.setMaximum(100)
+        # self.x_horizontalSlider.setProperty("value", 50)
+        # self.x_horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        # self.x_horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        # self.man_move_gridLayout.addWidget(self.x_horizontalSlider, 1, 3, 1, 1)
+        # self.b_step_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.b_step_label, 5, 1, 1, 1)
+        # self.dy_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.dy_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.dy_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.dy_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.dy_fdbk_label, 2, 8, 1, 1)
+        # self.y_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
+        #
+        # self.man_move_gridLayout.addWidget(self.y_radioButton, 2, 0, 1, 1)
         self.man_pos_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_pos_label.setMaximumSize(QtCore.QSize(16777215, 30))
 
         self.man_pos_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_pos_label, 0, 3, 1, 1)
-        self.db_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.db_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.db_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.db_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.db_fdbk_label, 5, 8, 1, 1)
-        self.b_man_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.b_man_label, 5, 4, 1, 1)
-        self.dc_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.dc_label, 6, 7, 1, 1)
+        # self.db_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.db_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.db_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.db_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.db_fdbk_label, 5, 8, 1, 1)
+        # self.b_man_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.b_man_label, 5, 4, 1, 1)
+        # self.dc_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.dc_label, 6, 7, 1, 1)
         self.man_select_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_select_label.setMaximumSize(QtCore.QSize(16777215, 30))
 
         self.man_select_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_select_label, 0, 0, 1, 1)
-        self.da_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.da_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.da_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.da_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.man_move_gridLayout.addWidget(self.da_fdbk_label, 4, 8, 1, 1)
-        self.dx_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.dx_label, 1, 7, 1, 1)
+        # self.da_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.da_fdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
+        # self.da_fdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        # self.da_fdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        # self.man_move_gridLayout.addWidget(self.da_fdbk_label, 4, 8, 1, 1)
+        # self.dx_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.dx_label, 1, 7, 1, 1)
         self.man_pos_real_fdbk_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_pos_real_fdbk_label.setMaximumSize(QtCore.QSize(16777215, 30))
 
         self.man_pos_real_fdbk_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_pos_real_fdbk_label, 0, 8, 1, 1)
-        self.a_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
-        self.man_move_gridLayout.addWidget(self.a_radioButton, 4, 0, 1, 1)
-        self.z_man_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_move_gridLayout.addWidget(self.z_man_label, 3, 4, 1, 1)
-        self.x_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-        self.x_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
-        self.man_move_gridLayout.addWidget(self.x_man_textEdit, 1, 5, 1, 1)
-        self.y_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-        self.y_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
-        self.man_move_gridLayout.addWidget(self.y_man_textEdit, 2, 5, 1, 1)
-        self.z_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-        self.z_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
-        self.man_move_gridLayout.addWidget(self.z_man_textEdit, 3, 5, 1, 1)
-        self.a_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-        self.a_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
-        self.man_move_gridLayout.addWidget(self.a_man_textEdit, 4, 5, 1, 1)
-        self.b_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-        self.b_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
-        self.man_move_gridLayout.addWidget(self.b_man_textEdit, 5, 5, 1, 1)
-        self.c_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
-        self.c_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
-        self.man_move_gridLayout.addWidget(self.c_man_textEdit, 6, 5, 1, 1)
+        # self.a_radioButton = QtWidgets.QRadioButton(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.a_radioButton, 4, 0, 1, 1)
+        # self.z_man_label = QtWidgets.QLabel(parent=self.manualCTab)
+        # self.man_move_gridLayout.addWidget(self.z_man_label, 3, 4, 1, 1)
+        # self.x_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.x_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
+        # self.man_move_gridLayout.addWidget(self.x_man_textEdit, 1, 5, 1, 1)
+        # self.y_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.y_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
+        # self.man_move_gridLayout.addWidget(self.y_man_textEdit, 2, 5, 1, 1)
+        # self.z_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.z_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
+        # self.man_move_gridLayout.addWidget(self.z_man_textEdit, 3, 5, 1, 1)
+        # self.a_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.a_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
+        # self.man_move_gridLayout.addWidget(self.a_man_textEdit, 4, 5, 1, 1)
+        # self.b_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.b_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
+        # self.man_move_gridLayout.addWidget(self.b_man_textEdit, 5, 5, 1, 1)
+        # self.c_man_textEdit = QtWidgets.QTextEdit(parent=self.manualCTab)
+        # self.c_man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
+        # self.man_move_gridLayout.addWidget(self.c_man_textEdit, 6, 5, 1, 1)
         self.man_input_label = QtWidgets.QLabel(parent=self.manualCTab)
-        self.man_input_label.setMaximumSize(QtCore.QSize(16777215, 30))
+        self.man_input_label.setMaximumHeight(30)
 
         self.man_input_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_input_label, 0, 5, 1, 1)
         self.man_main_VLayout.addLayout(self.man_move_gridLayout)
         self.man_stop_pushButton = QtWidgets.QPushButton(parent=self.manualCTab)
         self.man_stop_pushButton.setMaximumSize(QtCore.QSize(100, 16777215))
+
+        self.man_step_label.setText("Step size")
+        self.man_pos_label.setText("Position Selection")
+        self.man_select_label.setText("Movement Selection")
+        self.man_pos_real_fdbk_label.setText("Position accuracy")
+        self.man_input_label.setText("Manual In")
 
         self.man_stop_pushButton.setStyleSheet("font-weight: bold")
         self.man_main_VLayout.addWidget(self.man_stop_pushButton)
@@ -924,96 +996,96 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_port_label.setText(_translate("MainWindow", "Robot Port"))
         self.con_log_header_label.setText(_translate("MainWindow", "Log Information"))
         self.mainTabWidget.setTabText(self.mainTabWidget.indexOf(self.connectionTab), _translate("MainWindow", "Connection"))
-        self.dz_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.x_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
-"<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
-        self.z_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.x_man_label.setText(_translate("MainWindow", "Xman"))
-        self.z_radioButton.setText(_translate("MainWindow", "Z"))
-        self.dz_label.setText(_translate("MainWindow", "dZ"))
-        self.man_pos_fdbk_label.setText(_translate("MainWindow", "Position feedback"))
-        self.da_label.setText(_translate("MainWindow", "dA"))
-        self.a_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
-"<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
-        self.dx_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.x_radioButton.setText(_translate("MainWindow", "X"))
-        self.y_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
-"<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
-        self.z_step_label.setText(_translate("MainWindow", "sZ"))
-        self.y_man_label.setText(_translate("MainWindow", "Yman"))
-        self.z_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
-"<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
-        self.b_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
-"<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
-        self.man_step_label.setText(_translate("MainWindow", "Step size"))
-        self.c_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
-"<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
-"p, li { white-space: pre-wrap; }\n"
-"hr { height: 1px; border-width: 0; }\n"
-"li.unchecked::marker { content: \"\\2610\"; }\n"
-"li.checked::marker { content: \"\\2612\"; }\n"
-"</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
-"<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
-        self.x_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.y_step_label.setText(_translate("MainWindow", "sY"))
-        self.b_radioButton.setText(_translate("MainWindow", "B"))
-        self.a_step_label.setText(_translate("MainWindow", "sA"))
-        self.dc_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.c_step_label.setText(_translate("MainWindow", "sC"))
-        self.b_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.c_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.y_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.a_man_label.setText(_translate("MainWindow", "Aman"))
-        self.x_step_label.setText(_translate("MainWindow", "sX"))
-        self.c_radioButton.setText(_translate("MainWindow", "C"))
-        self.dy_label.setText(_translate("MainWindow", "dY"))
-        self.a_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.c_man_label.setText(_translate("MainWindow", "Cman"))
-        self.db_label.setText(_translate("MainWindow", "dB"))
-        self.b_step_label.setText(_translate("MainWindow", "sB"))
-        self.dy_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.y_radioButton.setText(_translate("MainWindow", "Y"))
-        self.man_pos_label.setText(_translate("MainWindow", "Position Selection"))
-        self.db_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.b_man_label.setText(_translate("MainWindow", "Bman"))
-        self.dc_label.setText(_translate("MainWindow", "dC"))
-        self.man_select_label.setText(_translate("MainWindow", "Movement Selection"))
-        self.da_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
-        self.dx_label.setText(_translate("MainWindow", "dX"))
-        self.man_pos_real_fdbk_label.setText(_translate("MainWindow", "Position accuracy"))
-        self.a_radioButton.setText(_translate("MainWindow", "A"))
-        self.z_man_label.setText(_translate("MainWindow", "Zman"))
-        self.man_input_label.setText(_translate("MainWindow", "Manual In"))
+#         self.dz_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.x_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+# "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
+# "p, li { white-space: pre-wrap; }\n"
+# "hr { height: 1px; border-width: 0; }\n"
+# "li.unchecked::marker { content: \"\\2610\"; }\n"
+# "li.checked::marker { content: \"\\2612\"; }\n"
+# "</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+# "<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
+#         self.z_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.x_man_label.setText(_translate("MainWindow", "Xman"))
+#         self.z_radioButton.setText(_translate("MainWindow", "Z"))
+#         self.dz_label.setText(_translate("MainWindow", "dZ"))
+#         self.man_pos_fdbk_label.setText(_translate("MainWindow", "Position feedback"))
+#         self.dx_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.x_radioButton.setText(_translate("MainWindow", "X"))
+#         self.y_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+# "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
+# "p, li { white-space: pre-wrap; }\n"
+# "hr { height: 1px; border-width: 0; }\n"
+# "li.unchecked::marker { content: \"\\2610\"; }\n"
+# "li.checked::marker { content: \"\\2612\"; }\n"
+# "</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+# "<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
+#         self.z_step_label.setText(_translate("MainWindow", "sZ"))
+#         self.y_man_label.setText(_translate("MainWindow", "Yman"))
+#         self.z_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+# "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
+# "p, li { white-space: pre-wrap; }\n"
+# "hr { height: 1px; border-width: 0; }\n"
+# "li.unchecked::marker { content: \"\\2610\"; }\n"
+# "li.checked::marker { content: \"\\2612\"; }\n"
+# "</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+# "<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
+#         self.b_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+# "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
+# "p, li { white-space: pre-wrap; }\n"
+# "hr { height: 1px; border-width: 0; }\n"
+# "li.unchecked::marker { content: \"\\2610\"; }\n"
+# "li.checked::marker { content: \"\\2612\"; }\n"
+# "</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+# "<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
+        
+#         self.c_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+# "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
+# "p, li { white-space: pre-wrap; }\n"
+# "hr { height: 1px; border-width: 0; }\n"
+# "li.unchecked::marker { content: \"\\2610\"; }\n"
+# "li.checked::marker { content: \"\\2612\"; }\n"
+# "</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+# "<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
+#         self.x_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.y_step_label.setText(_translate("MainWindow", "sY"))
+#         self.b_radioButton.setText(_translate("MainWindow", "B"))
+#         self.a_step_label.setText(_translate("MainWindow", "sA"))
+#         self.a_man_label.setText(_translate("MainWindow", "Aman"))
+#         self.a_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.da_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.a_radioButton.setText(_translate("MainWindow", "A"))
+#         self.da_label.setText(_translate("MainWindow", "dA"))
+#         self.a_step_textEdit.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+# "<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\n"
+# "p, li { white-space: pre-wrap; }\n"
+# "hr { height: 1px; border-width: 0; }\n"
+# "li.unchecked::marker { content: \"\\2610\"; }\n"
+# "li.checked::marker { content: \"\\2612\"; }\n"
+# "</style></head><body style=\" font-family:\'Segoe UI\'; font-size:9pt; font-weight:400; font-style:normal;\">\n"
+# "<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><br /></p></body></html>"))
+#         self.dc_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.c_step_label.setText(_translate("MainWindow", "sC"))
+#         self.b_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.c_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.y_pos_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.x_step_label.setText(_translate("MainWindow", "sX"))
+#         self.c_radioButton.setText(_translate("MainWindow", "C"))
+#         self.dy_label.setText(_translate("MainWindow", "dY"))
+#         self.c_man_label.setText(_translate("MainWindow", "Cman"))
+#         self.db_label.setText(_translate("MainWindow", "dB"))
+#         self.b_step_label.setText(_translate("MainWindow", "sB"))
+#         self.dy_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.y_radioButton.setText(_translate("MainWindow", "Y"))
+        
+#         self.db_fdbk_label.setText(_translate("MainWindow", "TextLabel"))
+#         self.b_man_label.setText(_translate("MainWindow", "Bman"))
+#         self.dc_label.setText(_translate("MainWindow", "dC"))
+        
+#         self.dx_label.setText(_translate("MainWindow", "dX"))
+        
+#         self.z_man_label.setText(_translate("MainWindow", "Zman"))
+        
         self.man_stop_pushButton.setText(_translate("MainWindow", "STOP"))
         self.mainTabWidget.setTabText(self.mainTabWidget.indexOf(self.manualCTab), _translate("MainWindow", "Manual Control"))
         self.xyzS_params_label.setText(_translate("MainWindow", "Scan Parameters"))
