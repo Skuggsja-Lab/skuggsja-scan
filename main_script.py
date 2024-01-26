@@ -95,54 +95,53 @@ class ManualControlWidget(QtWidgets.QWidget):
         self.man_textEdit.setText(str(self.new_val))
 
 class ScanParametersWidget(QtWidgets.QWidget):
-    def __init__(self, parent=None, coordinate = '_'):
+    def __init__(self, parent=None):
         super(ScanParametersWidget, self).__init__(parent)
-        self.xyzS_params_VLayout = QtWidgets.QVBoxLayout(self)
-        self.xyzS_params_label = QtWidgets.QLabel(parent=self)
-        self.xyzS_params_label.setMaximumHeight(30)
-        self.xyzS_params_label.setStyleSheet("font-weight: bold")
-        self.xyzS_params_label.setText("Scan Parameters")
-        # self.xyzS_params_label.setSizePolicy(QtWidgets.QSizePolicy.)
+        self.scan_params_VLayout = QtWidgets.QVBoxLayout(self)
+        self.scan_params_label = QtWidgets.QLabel()
+        self.scan_params_label.setMaximumHeight(30)
+        self.scan_params_label.setStyleSheet("font-weight: bold")
+        self.scan_params_label.setText("Scan Parameters")
+        # self.scan_params_label.setSizePolicy(QtWidgets.QSizePolicy.)
 
-        self.x0_label = QtWidgets.QLabel(parent=self)
-        self.y0_label = QtWidgets.QLabel(parent=self)
-        self.z0_label = QtWidgets.QLabel(parent=self)
-        self.x0_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.y0_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.z0_lineEdit = QtWidgets.QLineEdit(parent=self)
+        self.x0_label = QtWidgets.QLabel()
+        self.y0_label = QtWidgets.QLabel()
+        self.z0_label = QtWidgets.QLabel()
+        self.x0_lineEdit = QtWidgets.QLineEdit()
+        self.y0_lineEdit = QtWidgets.QLineEdit()
+        self.z0_lineEdit = QtWidgets.QLineEdit()
 
-        self.a0_label = QtWidgets.QLabel(parent=self)
-        self.b0_label = QtWidgets.QLabel(parent=self)
-        self.c0_label = QtWidgets.QLabel(parent=self)
-        self.a0_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.b0_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.c0_lineEdit = QtWidgets.QLineEdit(parent=self)
+        self.a0_label = QtWidgets.QLabel()
+        self.b0_label = QtWidgets.QLabel()
+        self.c0_label = QtWidgets.QLabel()
+        self.a0_lineEdit = QtWidgets.QLineEdit()
+        self.b0_lineEdit = QtWidgets.QLineEdit()
+        self.c0_lineEdit = QtWidgets.QLineEdit()
 
-        self.x1min_label = QtWidgets.QLabel(parent=self)
-        self.x1max_label = QtWidgets.QLabel(parent=self)
-        self.x1step_label = QtWidgets.QLabel(parent=self)
-        self.x1min_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.x1max_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.x1step_lineEdit = QtWidgets.QLineEdit(parent=self)
+        self.x1min_label = QtWidgets.QLabel()
+        self.x1max_label = QtWidgets.QLabel()
+        self.x1step_label = QtWidgets.QLabel()
+        self.x1min_lineEdit = QtWidgets.QLineEdit()
+        self.x1max_lineEdit = QtWidgets.QLineEdit()
+        self.x1step_lineEdit = QtWidgets.QLineEdit()
 
-        self.x2min_label = QtWidgets.QLabel(parent=self)
-        self.x2max_label = QtWidgets.QLabel(parent=self)
-        self.x2step_label = QtWidgets.QLabel(parent=self)
-        self.x2min_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.x2max_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.x2step_lineEdit = QtWidgets.QLineEdit(parent=self)
+        self.x2min_label = QtWidgets.QLabel()
+        self.x2max_label = QtWidgets.QLabel()
+        self.x2step_label = QtWidgets.QLabel()
+        self.x2min_lineEdit = QtWidgets.QLineEdit()
+        self.x2max_lineEdit = QtWidgets.QLineEdit()
+        self.x2step_lineEdit = QtWidgets.QLineEdit()
 
-        self.x3min_label = QtWidgets.QLabel(parent=self)
-        self.x3max_label = QtWidgets.QLabel(parent=self)
-        self.x3step_label = QtWidgets.QLabel(parent=self)
-        self.x3min_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.x3max_lineEdit = QtWidgets.QLineEdit(parent=self)
-        self.x3step_lineEdit = QtWidgets.QLineEdit(parent=self)
+        self.x3min_label = QtWidgets.QLabel()
+        self.x3max_label = QtWidgets.QLabel()
+        self.x3step_label = QtWidgets.QLabel()
+        self.x3min_lineEdit = QtWidgets.QLineEdit()
+        self.x3max_lineEdit = QtWidgets.QLineEdit()
+        self.x3step_lineEdit = QtWidgets.QLineEdit()
 
         self.origin_params_w_list = [self.x0_label,self.x0_lineEdit,
                                      self.y0_label,self.y0_lineEdit,
                                      self.z0_label,self.z0_lineEdit]
-
         self.orientation_params_w_list = [self.a0_label, self.a0_lineEdit,
                                      self.b0_label, self.b0_lineEdit,
                                      self.c0_label, self.c0_lineEdit]
@@ -159,21 +158,15 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.params_rows = [self.origin_params_w_list,self.orientation_params_w_list,
                             self.x1_params_w_list,self.x2_params_w_list,self.x3_params_w_list]
 
-        self.xyzS_params_gridLayout = QtWidgets.QGridLayout()
+        self.scan_params_gridLayout = QtWidgets.QGridLayout()
         for ir, r in enumerate(self.params_rows):
             for iw, w in enumerate(r):
-                self.xyzS_params_gridLayout.addWidget(w, ir, iw, 1, 1)
+                self.scan_params_gridLayout.addWidget(w, ir, iw, 1, 1)
 
-        self.scan_types = ["XYZ scan","Spherical scan"]
-        self.scan_type_combobox = QtWidgets.QComboBox(parent=self)
-        self.scan_type_combobox.addItems(self.scan_types)
-        self.scan_type_combobox.currentTextChanged.connect(lambda: self.set_scan(self.scan_type_combobox.currentText()))
-
-
-
-        self.xyzS_params_VLayout.addWidget(self.xyzS_params_label)
-        self.xyzS_params_VLayout.addLayout(self.xyzS_params_gridLayout)
-        self.xyzS_params_VLayout.addWidget(self.scan_type_combobox)
+        self.scan_params_VLayout.addWidget(self.scan_params_label)
+        self.scan_params_VLayout.addLayout(self.scan_params_gridLayout)
+        size_policy = QtWidgets.QSizePolicy()
+        self.setSizePolicy(size_policy)
 
         self.set_scan("XYZ scan")
 
@@ -202,8 +195,61 @@ class ScanParametersWidget(QtWidgets.QWidget):
         else:
             for w in self.params_rows[2][2:]:
                 w.setVisible(True)
+                
+class VNAParametersWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(VNAParametersWidget, self).__init__(parent)
 
+        self.VLayout = QtWidgets.QVBoxLayout(self)
+        self.label = QtWidgets.QLabel()
+        self.label.setStyleSheet("font-weight: bold")
+        self.label.setMaximumHeight(30)
+        self.label.setText("VNA Parameters")
+        self.VLayout.addWidget(self.label)
 
+        self.gridLayout = QtWidgets.QGridLayout()
+        self.ifbw_label = QtWidgets.QLabel()
+        self.ifbw_label.setText("IF BW")
+        self.ifbw_lineEdit = QtWidgets.QLineEdit()
+        self.fmin_label = QtWidgets.QLabel()
+        self.fmin_label.setText("f min")
+        self.fmin_lineEdit = QtWidgets.QLineEdit()
+        self.fmax_label = QtWidgets.QLabel()
+        self.fmax_label.setText("f max")
+        self.fmax_lineEdit = QtWidgets.QLineEdit()
+        self.fstp_label = QtWidgets.QLabel()
+        self.fstp_label.setText("f step")
+        self.fstp_lineEdit = QtWidgets.QLineEdit()
+        self.attn_label = QtWidgets.QLabel()
+        self.attn_label.setText("Attenuation")
+        self.attn_lineEdit = QtWidgets.QLineEdit()
+        self.sttl_label = QtWidgets.QLabel()
+        self.sttl_label.setText("Settling time")
+        self.sttl_lineEdit = QtWidgets.QLineEdit()
+        self.ab_checkBox = QtWidgets.QCheckBox()
+        self.ab_checkBox.setText("A/B")
+        self.fwbw_checkBox = QtWidgets.QCheckBox()
+        self.fwbw_checkBox.setText("Frwd/Bckwd")
+        self.pushButton = QtWidgets.QPushButton()
+        self.pushButton.setText("Send to VNA")
+
+        self.gridLayout.addWidget(self.ifbw_label, 0, 0, 1, 1)
+        self.gridLayout.addWidget(self.ifbw_lineEdit, 0, 1, 1, 1)
+        self.gridLayout.addWidget(self.fmin_label, 0, 2, 1, 1)
+        self.gridLayout.addWidget(self.fmin_lineEdit, 0, 3, 1, 1)
+        self.gridLayout.addWidget(self.fmax_label, 0, 4, 1, 1)
+        self.gridLayout.addWidget(self.fmax_lineEdit, 0, 5, 1, 1)
+        self.gridLayout.addWidget(self.fstp_label, 0, 6, 1, 1)
+        self.gridLayout.addWidget(self.fstp_lineEdit, 0, 7, 1, 1)
+        self.gridLayout.addWidget(self.attn_label, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.attn_lineEdit, 1, 1, 1, 1)
+        self.gridLayout.addWidget(self.sttl_label, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.sttl_lineEdit, 1, 3, 1, 1)
+        self.gridLayout.addWidget(self.ab_checkBox, 1, 4, 1, 1)
+        self.gridLayout.addWidget(self.fwbw_checkBox, 1, 5, 1, 1)
+        self.gridLayout.addWidget(self.pushButton, 1, 7, 1, 1)
+
+        self.VLayout.addLayout(self.gridLayout)
 
 
 
@@ -584,8 +630,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.xyzS_VLayout = QtWidgets.QVBoxLayout()
         self.scan_parameters_widget = ScanParametersWidget(scan_tab)
         self.xyzS_VLayout.addWidget(self.scan_parameters_widget)
-        self.gridLayout_6.addLayout(self.xyzS_VLayout,0,0,1,1)
 
+        self.scan_types = ["XYZ scan","Spherical scan"]
+        self.scan_type_combobox = QtWidgets.QComboBox(parent=self)
+        self.scan_type_combobox.addItems(self.scan_types)
+        self.scan_type_combobox.currentTextChanged.connect(lambda: update_scan_type(self.scan_type_combobox.currentText()))
+
+        self.xyzS_VLayout.addWidget(self.scan_type_combobox)
+        spacerItem3 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
+                                            QtWidgets.QSizePolicy.Policy.Expanding)
+        self.xyzS_VLayout.addItem(spacerItem3)
+
+        self.vna_parameters_widget = VNAParametersWidget(scan_tab)
+        self.xyzS_VLayout.addWidget(self.vna_parameters_widget)
+
+        self.gridLayout_6.addLayout(self.xyzS_VLayout,0,0,1,1)
+        
+        def update_scan_type(s_type):
+            self.scan_parameters_widget.set_scan(s_type)
 
         return scan_tab
             
