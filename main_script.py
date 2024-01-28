@@ -12,6 +12,56 @@ class QLabelFramed(QtWidgets.QLabel):
         self.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
+class ConnectionWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(ConnectionWidget, self).__init__(parent)
+        self.con_params_gridLayout = QtWidgets.QGridLayout(self)
+
+        self.robot_port_lineEdit = QtWidgets.QLineEdit()
+        self.cont_vna_pushButton = QtWidgets.QPushButton()
+        self.ping_robot_pushButton = QtWidgets.QPushButton()
+        self.robot_ip_label = QtWidgets.QLabel()
+        self.con_robot_pushButton = QtWidgets.QPushButton()
+        self.con_stop_pushButton = RobotStopButton()
+        self.vna_port_lineEdit = QtWidgets.QLineEdit()
+        self.vna_ip_label = QtWidgets.QLabel()
+        self.vna_port_label = QtWidgets.QLabel()
+        self.robot_ip_lineEdit = QtWidgets.QLineEdit()
+        self.ping_vna_pushButton = QtWidgets.QPushButton()
+        self.disconnect_pushButton = QtWidgets.QPushButton()
+        self.vna_ip_lineEdit = QtWidgets.QLineEdit()
+        self.robot_port_label = QtWidgets.QLabel()
+
+        self.robot_ip_label.setText("Robot IP")
+        self.robot_port_label.setText("Robot Port")
+        self.vna_ip_label.setText("VNA IP")
+        self.vna_port_label.setText("VNA Port")
+        self.ping_robot_pushButton.setText("Ping Robot")
+        self.ping_vna_pushButton.setText("Ping VNA")
+        self.cont_vna_pushButton.setText("Connect VNA")
+        self.con_robot_pushButton.setText("Connect Robot")
+        self.disconnect_pushButton.setText("Disconnect")
+
+        self.con_params_gridLayout.addWidget(self.robot_ip_label, 0, 0, 1, 1)
+        self.con_params_gridLayout.addWidget(self.robot_port_lineEdit, 1, 2, 1, 1)
+        self.con_params_gridLayout.addWidget(self.vna_ip_label, 2, 0, 1, 1)
+        self.con_params_gridLayout.addWidget(self.vna_port_label, 3, 0, 1, 1)
+        self.con_params_gridLayout.addWidget(self.vna_ip_lineEdit, 2, 2, 1, 1)
+        self.con_params_gridLayout.addWidget(self.vna_port_lineEdit, 3, 2, 1, 1)
+        self.con_params_gridLayout.addWidget(self.robot_ip_lineEdit, 0, 2, 1, 1)
+        self.con_params_gridLayout.addWidget(self.robot_port_label, 1, 0, 1, 1)
+
+        self.con_params_gridLayout.addWidget(self.ping_robot_pushButton, 4, 0, 1, 1)
+        self.con_params_gridLayout.addWidget(self.ping_vna_pushButton, 5, 0, 1, 1)
+        self.con_params_gridLayout.addWidget(self.con_stop_pushButton, 6, 0, 1, 1)
+        self.con_params_gridLayout.addWidget(self.con_robot_pushButton, 4, 1, 1, 1)
+        self.con_params_gridLayout.addWidget(self.cont_vna_pushButton, 5, 1, 1, 1)
+        self.con_params_gridLayout.addWidget(self.disconnect_pushButton, 6, 1, 1, 1)
+
+        self.con_params_gridLayout.addItem(QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
+                                                                 QtWidgets.QSizePolicy.Policy.Expanding), 7, 1, 1, 1)
+
+
 class ManualControlWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, coordinate = '_'):
         super(ManualControlWidget, self).__init__(parent)
@@ -357,9 +407,9 @@ class FeedbackWidget(QtWidgets.QWidget):
             for iw, w in enumerate(r[::2]):
                 w.setText(coordinates[ir][iw])
 
-class ScanLogWidget(QtWidgets.QWidget):
-    def __init__(self, parent=None, type = "XYZ scan"):
-        super(ScanLogWidget, self).__init__(parent)
+class LogWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(LogWidget, self).__init__(parent)
 
         self.VLayout = QtWidgets.QVBoxLayout(self)
         self.label = QtWidgets.QLabel()
@@ -367,12 +417,12 @@ class ScanLogWidget(QtWidgets.QWidget):
         self.label.setMaximumHeight(30)
         self.label.setText("Log")
         self.VLayout.addWidget(self.label)
-        self.textEdit = QtWidgets.QTextEdit()
-        self.textEdit.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self.VLayout.addWidget(self.textEdit)
+        self.textBrowser = QtWidgets.QTextBrowser()
+        # self.textBrowser.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.VLayout.addWidget(self.textBrowser)
 
 class PlotWidget(QtWidgets.QWidget):
-    def __init__(self, parent=None, type = "XYZ scan"):
+    def __init__(self, parent=None):
         super(PlotWidget, self).__init__(parent)
 
         self.VLayout = QtWidgets.QVBoxLayout(self)
@@ -383,7 +433,7 @@ class PlotWidget(QtWidgets.QWidget):
         self.VLayout.addWidget(self.canvas)
 
 class VNAPlotWidget(PlotWidget):
-    def __init__(self, parent=None, type = "XYZ scan"):
+    def __init__(self, parent=None):
         super(VNAPlotWidget, self).__init__(parent)
 
         self.gridLayout = QtWidgets.QGridLayout()
@@ -402,7 +452,7 @@ class VNAPlotWidget(PlotWidget):
         self.VLayout.addLayout(self.gridLayout)
 
 class ScanPlotWidget(PlotWidget):
-    def __init__(self, parent=None, type = "XYZ scan"):
+    def __init__(self, parent=None):
         super(ScanPlotWidget, self).__init__(parent)
         self.gridLayout = QtWidgets.QGridLayout()
 
@@ -472,50 +522,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.connection_main_HLayout = QtWidgets.QHBoxLayout(connectionTab)
         self.gridLayout_3.addLayout(self.connection_main_HLayout, 0, 0, 1, 1)
 
-        self.con_params_gridLayout = QtWidgets.QGridLayout()
+        self.connection_widget = ConnectionWidget()
 
-        self.robot_port_lineEdit = QtWidgets.QLineEdit(parent=connectionTab)
-        self.cont_vna_pushButton = QtWidgets.QPushButton(parent=connectionTab)
-        self.ping_robot_pushButton = QtWidgets.QPushButton(parent=connectionTab)
-        self.robot_ip_label = QtWidgets.QLabel(parent=connectionTab)
-        self.con_robot_pushButton = QtWidgets.QPushButton(parent=connectionTab)
-        self.con_stop_pushButton = RobotStopButton(parent=connectionTab)
-        self.vna_port_lineEdit = QtWidgets.QLineEdit(parent=connectionTab)
-        self.vna_ip_label = QtWidgets.QLabel(parent=connectionTab)
-        self.vna_port_label = QtWidgets.QLabel(parent=connectionTab)
-        self.robot_ip_lineEdit = QtWidgets.QLineEdit(parent=connectionTab)
-        self.ping_vna_pushButton = QtWidgets.QPushButton(parent=connectionTab)
-        self.disconnect_pushButton = QtWidgets.QPushButton(parent=connectionTab)
-        self.vna_ip_lineEdit = QtWidgets.QLineEdit(parent=connectionTab)
-        self.robot_port_label = QtWidgets.QLabel(parent=connectionTab)
+        self.connection_tab_log_widget = LogWidget()
+        # self.connection_tab_log_widget.textBrowser.setText("test")
 
-        self.con_params_gridLayout.addWidget(self.robot_port_lineEdit, 1, 2, 1, 1)
-        self.con_params_gridLayout.addWidget(self.cont_vna_pushButton, 5, 1, 1, 1)
-        self.con_params_gridLayout.addWidget(self.ping_robot_pushButton, 4, 0, 1, 1)
-        self.con_params_gridLayout.addWidget(self.robot_ip_label, 0, 0, 1, 1)
-        self.con_params_gridLayout.addWidget(self.con_robot_pushButton, 4, 1, 1, 1)
-        self.con_params_gridLayout.addWidget(self.con_stop_pushButton, 6, 0, 1, 1)
-        self.con_params_gridLayout.addWidget(self.vna_port_lineEdit, 3, 2, 1, 1)
-        self.con_params_gridLayout.addWidget(self.vna_ip_label, 2, 0, 1, 1)
-        self.con_params_gridLayout.addWidget(self.vna_port_label, 3, 0, 1, 1)
-        self.con_params_gridLayout.addWidget(self.robot_ip_lineEdit, 0, 2, 1, 1)
-        self.con_params_gridLayout.addWidget(self.ping_vna_pushButton, 5, 0, 1, 1)
-        self.con_params_gridLayout.addWidget(self.disconnect_pushButton, 6, 1, 1, 1)
-        self.con_params_gridLayout.addWidget(self.vna_ip_lineEdit, 2, 2, 1, 1)
-        self.con_params_gridLayout.addWidget(self.robot_port_label, 1, 0, 1, 1)
+        self.connection_main_HLayout.addWidget(self.connection_widget)
+        self.connection_main_HLayout.addWidget(self.connection_tab_log_widget)
 
-        self.con_params_gridLayout.addItem(QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
-                                                                 QtWidgets.QSizePolicy.Policy.Expanding), 7, 1, 1, 1)
-
-        self.connection_main_HLayout.addLayout(self.con_params_gridLayout)
-        self.con_log_gridLayout = QtWidgets.QGridLayout()
-        self.connection_main_HLayout.addLayout(self.con_log_gridLayout)
-
-        self.con_log_header_label = QtWidgets.QLabel(parent=connectionTab)
-        self.con_log_textB = QtWidgets.QTextBrowser(parent=connectionTab)
-
-        self.con_log_gridLayout.addWidget(self.con_log_header_label, 0, 0, 1, 1)
-        self.con_log_gridLayout.addWidget(self.con_log_textB, 1, 0, 1, 1)
         return connectionTab
 
     def initialize_manualCTab(self):
@@ -596,7 +610,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.robot_start_widget = RobotStartWidget()
         self.feedback_widget = FeedbackWidget()
-        self.log = ScanLogWidget()
+        self.log = LogWidget()
 
         self.xyzS_HLayout.addWidget(self.robot_start_widget)
         self.xyzS_HLayout.addWidget(self.feedback_widget)
@@ -644,13 +658,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gridLayout_2.addLayout(self.mainGridLayout, 0, 0, 1, 1)
         MainWindow.setCentralWidget(self.centralwidget)
 
-        self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 1624, 22))
-        self.menuSettings = QtWidgets.QMenu(parent=self.menubar)
-        self.menuHelp = QtWidgets.QMenu(parent=self.menubar)
-        MainWindow.setMenuBar(self.menubar)
-        self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
-        MainWindow.setStatusBar(self.statusbar)
 
         self.tracesDockWidget = QtWidgets.QDockWidget(parent=MainWindow)
         self.tracesDockWidget.setWidget(VNAPlotWidget())
@@ -664,43 +671,33 @@ class MainWindow(QtWidgets.QMainWindow):
 
         MainWindow.tabifyDockWidget(self.tracesDockWidget,self.scanDockWidget)
 
+        self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 1624, 22))
+        self.menuSettings = QtWidgets.QMenu(parent=self.menubar)
+        self.menuHelp = QtWidgets.QMenu(parent=self.menubar)
+        MainWindow.setMenuBar(self.menubar)
+        self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
+        MainWindow.setStatusBar(self.statusbar)
+        self.menuSettings.setTitle("Settings")
+        self.menuHelp.setTitle("Help")
+
         self.actionReset = QtGui.QAction(parent=MainWindow)
         self.actionClose = QtGui.QAction(parent=MainWindow)
         self.actionAbout = QtGui.QAction(parent=MainWindow)
+
+        self.actionReset.setText("Reset")
+        self.actionClose.setText("Close")
+        self.actionAbout.setText("About")
+
         self.menuSettings.addAction(self.actionReset)
         self.menuSettings.addAction(self.actionClose)
         self.menuHelp.addAction(self.actionAbout)
         self.menubar.addAction(self.menuSettings.menuAction())
         self.menubar.addAction(self.menuHelp.menuAction())
 
-        self.retranslateUi(MainWindow)
+        MainWindow.setWindowTitle("Main Window")
         self.mainTabWidget.setCurrentIndex(0)
-        QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
-
-
-    def retranslateUi(self, MainWindow):
-        _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
-        self.cont_vna_pushButton.setText(_translate("MainWindow", "Connect VNA"))
-        self.ping_robot_pushButton.setText(_translate("MainWindow", "Ping Robot"))
-        self.robot_ip_label.setText(_translate("MainWindow", "Robot IP"))
-        self.con_robot_pushButton.setText(_translate("MainWindow", "Connect Robot"))
-        self.con_stop_pushButton.setText(_translate("MainWindow", "STOP"))
-        self.vna_ip_label.setText(_translate("MainWindow", "VNA IP"))
-        self.vna_port_label.setText(_translate("MainWindow", "VNA Port"))
-        self.ping_vna_pushButton.setText(_translate("MainWindow", "Ping VNA"))
-        self.disconnect_pushButton.setText(_translate("MainWindow", "Disconnect"))
-        self.robot_port_label.setText(_translate("MainWindow", "Robot Port"))
-        self.con_log_header_label.setText(_translate("MainWindow", "Log Information"))
-
-
-        self.menuSettings.setTitle(_translate("MainWindow", "Settings"))
-        self.menuHelp.setTitle(_translate("MainWindow", "Help"))
-
-        self.actionReset.setText(_translate("MainWindow", "Reset"))
-        self.actionClose.setText(_translate("MainWindow", "Close"))
-        self.actionAbout.setText(_translate("MainWindow", "About"))
 
 if __name__ == '__main__':
     if not QtWidgets.QApplication.instance():
