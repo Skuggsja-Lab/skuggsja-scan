@@ -4,7 +4,11 @@ import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+import RsInstrument
+from skuggsja_config import Config
 
+def msgtoarr(s):
+    return np.fromstring(s, sep=',')
 class QLabelFramed(QtWidgets.QLabel):
     def __init__(self, parent=None):
         super(QLabelFramed, self).__init__(parent)
@@ -13,15 +17,19 @@ class QLabelFramed(QtWidgets.QLabel):
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
 class RobotStopButton(QtWidgets.QPushButton):
+
+    group = QtWidgets.QButtonGroup()
     def __init__(self, parent=None, robot_IP = "255.255.0.0"):
         super(RobotStopButton, self).__init__(parent)
         self.setText("STOP")
         self.setMaximumWidth(100)
         self.setStyleSheet("font-weight: bold")
-        self.clicked.connect(lambda: self.robot_stop_button(robot_IP))
+        # self.clicked.connect(lambda: self.robot_stop_button(robot_IP))
+        RobotStopButton.group.addButton(self)
 
     def robot_stop_button(self, robot_IP):
         print(f"Stop command sent to robot arm at {robot_IP}")
+        # print(self.group.buttons())
 
 class ConnectionWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -29,7 +37,7 @@ class ConnectionWidget(QtWidgets.QWidget):
         self.con_params_gridLayout = QtWidgets.QGridLayout(self)
 
         self.robot_port_lineEdit = QtWidgets.QLineEdit()
-        self.cont_vna_pushButton = QtWidgets.QPushButton()
+        self.con_vna_pushButton = QtWidgets.QPushButton()
         self.ping_robot_pushButton = QtWidgets.QPushButton()
         self.robot_ip_label = QtWidgets.QLabel()
         self.con_robot_pushButton = QtWidgets.QPushButton()
@@ -49,9 +57,9 @@ class ConnectionWidget(QtWidgets.QWidget):
         self.vna_port_label.setText("VNA Port")
         self.ping_robot_pushButton.setText("Ping Robot")
         self.ping_vna_pushButton.setText("Ping VNA")
-        self.cont_vna_pushButton.setText("Connect VNA")
+        self.con_vna_pushButton.setText("Connect VNA")
         self.con_robot_pushButton.setText("Connect Robot")
-        self.disconnect_pushButton.setText("Disconnect")
+        self.disconnect_pushButton.setText("Disconnect both")
 
         self.con_params_gridLayout.addWidget(self.robot_ip_label, 0, 0, 1, 1)
         self.con_params_gridLayout.addWidget(self.robot_port_lineEdit, 1, 2, 1, 1)
@@ -66,11 +74,13 @@ class ConnectionWidget(QtWidgets.QWidget):
         self.con_params_gridLayout.addWidget(self.ping_vna_pushButton, 5, 0, 1, 1)
         self.con_params_gridLayout.addWidget(self.con_stop_pushButton, 6, 0, 1, 1)
         self.con_params_gridLayout.addWidget(self.con_robot_pushButton, 4, 1, 1, 1)
-        self.con_params_gridLayout.addWidget(self.cont_vna_pushButton, 5, 1, 1, 1)
+        self.con_params_gridLayout.addWidget(self.con_vna_pushButton, 5, 1, 1, 1)
         self.con_params_gridLayout.addWidget(self.disconnect_pushButton, 6, 1, 1, 1)
 
         self.con_params_gridLayout.addItem(QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
                                                                  QtWidgets.QSizePolicy.Policy.Expanding), 7, 1, 1, 1)
+
+            
 
 class ManualControlWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, coordinate = '_'):
@@ -231,6 +241,7 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.set_scan(type)
 
     def set_scan(self,scan_type):
+        coordinates = ["X1", "X2", "X3"]
         if scan_type == "XYZ scan":
             for iw, w in enumerate(self.origin_params_w_list[::2]):
                 w.setText(["X0","Y0","Z0"][iw])
@@ -404,6 +415,8 @@ class FeedbackWidget(QtWidgets.QWidget):
         coordinates = [["X", "Y", "Z"],["A", "B", "C"]]
         if scan_type == "Spherical scan":
             coordinates.append(["R", "φ", "θ"])
+        else:
+            coordinates.append(["X1", "X2", "X3"])
         rows = len(self.params_rows)
         if scan_type == "XYZ scan":
             rows -= 1
@@ -511,7 +524,154 @@ class ScanPlotWidget(PlotWidget):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
+        self.configs = Config()
         self.setupUi(self)
+        self.vna_connected = False
+        self.vna_parameters_widget.setEnabled(False)
+        self.vna_plot_w.setEnabled(False)
+
+        print(self.configs.VNA_settings)
+        self.connection_widget.vna_ip_lineEdit.setText(self.configs.VNA_settings["ip"])
+        self.connection_widget.con_vna_pushButton.clicked.connect(self.vna_connect_button_clicked)
+
+        RobotStopButton.group.buttonClicked.connect(lambda: self.append_log(f"Stop command sent to robot arm at {self.connection_widget.vna_ip_lineEdit.text()}"))
+
+        self.timer = QtCore.QTimer()
+        self.timer.setInterval(10)
+        self.timer.stop()
+        self.timer.timeout.connect(self.plot_update)
+        self.toggle_var = False
+        self.vna_plot_w.button_update_continuous.clicked.connect(self.toggle)
+        self.vna_plot_w.button_step.clicked.connect(self.step_plot)
+        
+    def append_log(self, text):
+        self.connection_tab_log_widget.textBrowser.append(text)
+        self.log.textBrowser.append(text)
+
+    def vna_connect_button_clicked(self):
+        if not self.vna_connected:
+            try:
+                self.instr = RsInstrument.RsInstrument(f"TCPIP::{self.connection_widget.vna_ip_lineEdit.text()}::hislip0",True,False)
+                self.append_log("Succesfully connected to "+self.instr.query_str("*IDN?"))
+                print(self.instr.query_str("*IDN?"))
+                self.vna_connected = True
+                self.connection_widget.con_vna_pushButton.setText("Disconnect VNA")
+                self.connection_widget.con_vna_pushButton.setStyleSheet("background-color: red")
+                self.plot_initialize()
+            except RsInstrument.RsInstrException:
+                print("no")
+                self.append_log("Connection Failed")
+                self.vna_connected = False
+        elif self.vna_connected:
+            self.instr.close()
+            self.append_log("VNA session closed")
+            self.vna_connected = False
+            self.connection_widget.con_vna_pushButton.setText("Connect VNA")
+            self.connection_widget.con_vna_pushButton.setStyleSheet("background-color: light gray")
+        self.vna_parameters_widget.setEnabled(self.vna_connected)
+        self.vna_plot_w.setEnabled(self.vna_connected)
+        if self.toggle_var:
+            self.toggle()
+
+    def query_data(self, ch, raw=False):
+        """Returns the array of datapoints from the VNA.
+        Formatted real values if raw is True, unformatted complex if false"""
+        data = msgtoarr(self.instr.query(f'CALC1:DATA:TRAC? "Trc{ch}", {["F", "S"][raw]}DAT'))
+        if raw:
+            data = data[::2] + 1j * data[1::2]
+        return data
+    def plot_initialize(self):
+
+        self.vna_plot_w.figure.clear()
+
+        self.ax = self.vna_plot_w.figure.add_subplot(111)
+        self.ax.set_xlabel('Frequency, GHz')
+        self.ax.set_ylabel('S-parameters, dB')
+        self.instr.query_str_list("CONFigure:TRACe:CATalog?")
+        self.configs.traces_to_show = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')[::2]
+        self.traces = []
+        self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
+        for tr_n in self.configs.traces_to_show:
+            self.traces.append(self.ax.plot(self.freq_arr, self.query_data(tr_n), label=f"trace {tr_n}")[0])
+        self.ax.legend()
+        self.vna_plot_w.figure.tight_layout()
+
+        # self.freq_select_vline = self.ax.axvline(self.textfield_frequency_slider.value() / 10)
+
+        # refresh canvas
+        self.vna_plot_w.canvas.draw()
+
+    def plot_update(self):
+        """Update the data trace shown on the plot with the one currently on the VNA screen"""
+        for i, trace in enumerate(self.traces):
+            trace.set_ydata(self.query_data(self.configs.traces_to_show[i]))
+        self.vna_plot_w.canvas.draw()
+
+    def set_VNA_settings(self):
+        try:
+            None
+            new_bandwidth = self.vna_parameters_widget.ifbw_lineEdit.text()
+            new_points = self.vna_parameters_widget.fstp_lineEdit.text()
+            # new_averaged = self.textfield_averaging.text()
+            # if len(self.point_coordinates):
+            #     dlg = FrequencyResolutionDialog()
+            #     if dlg.exec():
+            #         self.frequency_reset()
+            #         self.scan_plot_update()
+            #         pass
+            #     else:
+            #         return
+            if new_bandwidth != '':
+                self.instr.write(f'SENSe:BAND {float(new_bandwidth)}')
+            if new_points != '':
+                self.instr.write(f'SWEep:POINts {int(new_points)}')
+            # if new_averaged != '':
+            #     self.instr.write(f'AVERage:COUNt {int(new_averaged)}')
+            self.update_VNA_settings()
+            self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
+            self.plot_initialize()
+            self.plot_initialize()
+        except ValueError:
+            print('Inputted value is invalid')
+
+    def update_VNA_settings(self):
+        """Queries the VNA for the current settings an updates the text in the widget.
+        Also saves the current settings to the latest_settings.toml file."""
+        self.configs.VNA_settings["bandwidth"] = self.instr.query_float('SENSe:BAND?')
+        self.configs.VNA_settings["point_number"] = self.instr.query_int('SWEep:POINts?')
+        self.configs.VNA_settings["time_per_sweep"] = self.instr.query_float('SWEep:TIMe?')
+        self.configs.VNA_settings["averaged_samples"] = self.instr.query_int('AVERage:COUNt?')
+        # self.VNA_settings.setText(
+        #     f"Bandwidth: {str(self.configs.VNA_settings['bandwidth']) + ' Hz' if float(self.configs.VNA_settings['bandwidth']) < 1000 else '{:.0f} kHz'.format(self.configs.VNA_settings['bandwidth'] / 1e3)}  "
+        #     f"\nNumber of points: {self.configs.VNA_settings['point_number']} "
+        #     f"\nAveraged samples: {self.configs.VNA_settings['averaged_samples']} "
+        #     f"\nSeconds per sweep: {self.configs.VNA_settings['time_per_sweep']}")
+        self.configs.save_toml("latest_settings.toml")
+
+    def button_text_update(self):
+        if self.toggle_var:
+            self.vna_plot_w.button_update_continuous.setText("Plot (push to stop)")
+            self.vna_plot_w.button_step.setText("Step (push to stop and update)")
+        else:
+            self.vna_plot_w.button_update_continuous.setText("Plot")
+            self.vna_plot_w.button_step.setText("Step")
+
+    def step_plot(self):
+        self.plot_update()
+        if self.toggle_var:
+            self.timer.stop()
+            self.toggle_var = not self.toggle_var
+        self.button_text_update()
+
+    def toggle(self):
+        """Toggles the plot continuously refreshing"""
+        if self.toggle_var:
+            self.timer.stop()
+        else:
+            self.timer.start()
+        self.toggle_var = not self.toggle_var
+        self.button_text_update()
+
 
     def initialize_connectionTab(self):
         connectionTab = QtWidgets.QWidget()
@@ -536,7 +696,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.man_main_VLayout = QtWidgets.QVBoxLayout()
         self.man_move_gridLayout = QtWidgets.QGridLayout()
 
-        coordinates_list = ["X", "Y", "Z", "A", "B", "C", "T"]
+        coordinates_list = ["X", "Y", "Z", "A", "B", "C"]
         self.coordinates_widgets_list = []
         for ic, coord in enumerate(coordinates_list):
             setattr(self, f"manual_control_{coord}", ManualControlWidget(parent = manualCTab, coordinate= coord))
@@ -591,7 +751,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_parameters_widget = ScanParametersWidget()
         self.xyzS_VLayout.addWidget(self.scan_parameters_widget)
 
-        self.scan_types = ["XYZ scan","Spherical scan"]
+        self.scan_types = ["XYZ scan","Spherical scan","None"]
         self.scan_type_combobox = QtWidgets.QComboBox(parent=self)
         self.scan_type_combobox.addItems(self.scan_types)
         self.scan_type_combobox.currentTextChanged.connect(lambda: update_scan_type(self.scan_type_combobox.currentText()))
@@ -651,14 +811,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gridLayout_2.addLayout(self.mainGridLayout, 0, 0, 1, 1)
         MainWindow.setCentralWidget(self.centralwidget)
 
-
+        self.vna_plot_w = VNAPlotWidget()
         self.tracesDockWidget = QtWidgets.QDockWidget(parent=MainWindow)
-        self.tracesDockWidget.setWidget(VNAPlotWidget())
+        self.tracesDockWidget.setWidget(self.vna_plot_w)
         MainWindow.addDockWidget(QtCore.Qt.DockWidgetArea(2), self.tracesDockWidget)
         self.tracesDockWidget.setWindowTitle("VNA traces")
 
+        self.scan_plot_w = ScanPlotWidget()
         self.scanDockWidget = QtWidgets.QDockWidget(parent=MainWindow)
-        self.scanDockWidget.setWidget(ScanPlotWidget())
+        self.scanDockWidget.setWidget(self.scan_plot_w)
         MainWindow.addDockWidget(QtCore.Qt.DockWidgetArea(2), self.scanDockWidget)
         self.scanDockWidget.setWindowTitle("Scanned points")
 
