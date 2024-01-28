@@ -12,6 +12,17 @@ class QLabelFramed(QtWidgets.QLabel):
         self.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
+class RobotStopButton(QtWidgets.QPushButton):
+    def __init__(self, parent=None, robot_IP = "255.255.0.0"):
+        super(RobotStopButton, self).__init__(parent)
+        self.setText("STOP")
+        self.setMaximumWidth(100)
+        self.setStyleSheet("font-weight: bold")
+        self.clicked.connect(lambda: self.robot_stop_button(robot_IP))
+
+    def robot_stop_button(self, robot_IP):
+        print(f"Stop command sent to robot arm at {robot_IP}")
+
 class ConnectionWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(ConnectionWidget, self).__init__(parent)
@@ -60,7 +71,6 @@ class ConnectionWidget(QtWidgets.QWidget):
 
         self.con_params_gridLayout.addItem(QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
                                                                  QtWidgets.QSizePolicy.Policy.Expanding), 7, 1, 1, 1)
-
 
 class ManualControlWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, coordinate = '_'):
@@ -498,18 +508,6 @@ class ScanPlotWidget(PlotWidget):
         self.VLayout.addLayout(self.horizontalLayout)
 
 
-class RobotStopButton(QtWidgets.QPushButton):
-    def __init__(self, parent=None, robot_IP = "255.255.0.0"):
-        super(RobotStopButton, self).__init__(parent)
-        self.setText("STOP")
-        self.setMaximumWidth(100)
-        self.setStyleSheet("font-weight: bold")
-        self.clicked.connect(lambda: self.robot_stop_button(robot_IP))
-
-    def robot_stop_button(self, robot_IP):
-        print(f"Stop command sent to robot arm at {robot_IP}")
-
-
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
@@ -625,11 +623,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.feedback_widget.set_scan(s_type)
 
         return scan_tab
-            
-
-
-    def test(self):
-        print("this works")
         
     def setupUi(self, MainWindow):
         # MainWindow.resize(1624, 791)
@@ -670,6 +663,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scanDockWidget.setWindowTitle("Scanned points")
 
         MainWindow.tabifyDockWidget(self.tracesDockWidget,self.scanDockWidget)
+        self.tracesDockWidget.raise_()
 
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
         self.menubar.setGeometry(QtCore.QRect(0, 0, 1624, 22))
