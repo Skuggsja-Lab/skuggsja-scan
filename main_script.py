@@ -371,6 +371,83 @@ class ScanLogWidget(QtWidgets.QWidget):
         self.textEdit.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.VLayout.addWidget(self.textEdit)
 
+class PlotWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None, type = "XYZ scan"):
+        super(PlotWidget, self).__init__(parent)
+
+        self.VLayout = QtWidgets.QVBoxLayout(self)
+        self.figure = Figure(figsize=(5, 4), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.VLayout.addWidget(self.toolbar)
+        self.VLayout.addWidget(self.canvas)
+
+class VNAPlotWidget(PlotWidget):
+    def __init__(self, parent=None, type = "XYZ scan"):
+        super(VNAPlotWidget, self).__init__(parent)
+
+        self.gridLayout = QtWidgets.QGridLayout()
+        self.button_update_continuous = QtWidgets.QPushButton()
+        self.button_step = QtWidgets.QPushButton()
+        self.traces_to_show = QtWidgets.QComboBox()
+
+        self.button_update_continuous.setText("Plot")
+        self.button_step.setText("Step")
+
+        self.gridLayout.addWidget(self.button_update_continuous, 3, 0, 1, 1)
+        self.gridLayout.addWidget(self.button_step, 3, 1, 1, 1)
+        self.gridLayout.addWidget(self.traces_to_show, 1, 0, 1, 2)
+        self.gridLayout.addWidget(self.canvas, 0, 0, 1, 2)
+
+        self.VLayout.addLayout(self.gridLayout)
+
+class ScanPlotWidget(PlotWidget):
+    def __init__(self, parent=None, type = "XYZ scan"):
+        super(ScanPlotWidget, self).__init__(parent)
+        self.gridLayout = QtWidgets.QGridLayout()
+
+        self.gridLayout = QtWidgets.QGridLayout()
+        self.combobox_plot_format = QtWidgets.QComboBox()
+        self.checkbox_scatter = QtWidgets.QRadioButton()
+        self.coordinate_label = QtWidgets.QLabel()
+        self.coordinate_textfield = QtWidgets.QLineEdit()
+        self.coordinate_slider = QtWidgets.QSlider()
+        self.coordinate_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+        self.frequency_label = QtWidgets.QLabel()
+        self.frequency_textfield = QtWidgets.QLineEdit()
+        self.frequency_slider = QtWidgets.QSlider()
+        self.frequency_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+
+        self.checkbox_scatter.setText("Plot Format: line/scatter")
+        self.coordinate_label.setText("Change coordinate to (mm):")
+        self.frequency_label.setText("Change frequency to (GHz):")
+
+        self.gridLayout.addWidget(self.combobox_plot_format, 1, 0, 1, 2)
+        self.gridLayout.addWidget(self.checkbox_scatter, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.coordinate_label, 3, 0, 1, 1)
+        self.gridLayout.addWidget(self.coordinate_textfield, 3, 1, 1, 1)
+        self.gridLayout.addWidget(self.coordinate_slider, 3, 2, 1, 1)
+        self.gridLayout.addWidget(self.frequency_label, 2, 0, 1, 1)
+        self.gridLayout.addWidget(self.frequency_textfield, 2, 1, 1, 1)
+        self.gridLayout.addWidget(self.frequency_slider, 2, 2, 1, 1)
+
+        self.horizontalLayout = QtWidgets.QHBoxLayout()
+        self.button_save_current_points = QtWidgets.QPushButton()
+        self.button_save_all_points_at_frequency = QtWidgets.QPushButton()
+        self.button_save_all_points = QtWidgets.QPushButton()
+
+        self.button_save_current_points.setText("Save current slice as .txt")
+        self.button_save_all_points_at_frequency.setText("Save all points at current frequency as .txt")
+        self.button_save_all_points.setText("Save all points as .txt")
+
+        self.horizontalLayout.addWidget(self.button_save_current_points)
+        self.horizontalLayout.addWidget(self.button_save_all_points_at_frequency)
+        self.horizontalLayout.addWidget(self.button_save_all_points)
+
+        self.VLayout.addLayout(self.gridLayout)
+        self.VLayout.addLayout(self.horizontalLayout)
+
+
 class RobotStopButton(QtWidgets.QPushButton):
     def __init__(self, parent=None, robot_IP = "255.255.0.0"):
         super(RobotStopButton, self).__init__(parent)
@@ -542,11 +619,6 @@ class MainWindow(QtWidgets.QMainWindow):
         
     def setupUi(self, MainWindow):
         # MainWindow.resize(1624, 791)
-
-        self.figure = Figure(figsize=(5, 4), dpi=100)
-        self.canvas = FigureCanvas(self.figure)
-        self.toolbar = NavigationToolbar(self.canvas, self)
-
         MainWindow.setDockOptions(QtWidgets.QMainWindow.DockOption.AllowTabbedDocks|QtWidgets.QMainWindow.DockOption.AnimatedDocks|QtWidgets.QMainWindow.DockOption.VerticalTabs)
         self.centralwidget = QtWidgets.QWidget(parent=MainWindow)
 
@@ -571,6 +643,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mainGridLayout.addWidget(self.mainTabWidget, 0, 0, 1, 1)
         self.gridLayout_2.addLayout(self.mainGridLayout, 0, 0, 1, 1)
         MainWindow.setCentralWidget(self.centralwidget)
+
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
         self.menubar.setGeometry(QtCore.QRect(0, 0, 1624, 22))
         self.menuSettings = QtWidgets.QMenu(parent=self.menubar)
@@ -578,53 +651,19 @@ class MainWindow(QtWidgets.QMainWindow):
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
         MainWindow.setStatusBar(self.statusbar)
-        self.tracesDockWidget = QtWidgets.QDockWidget(parent=MainWindow)
-        self.dockWidgetContents = QtWidgets.QWidget()
-        self.gridLayout = QtWidgets.QGridLayout(self.dockWidgetContents)
-        self.button_step = QtWidgets.QPushButton(parent=self.dockWidgetContents)
-        self.gridLayout.addWidget(self.button_step, 3, 0, 1, 1)
-        self.button_update_continuous = QtWidgets.QPushButton(parent=self.dockWidgetContents)
-        self.gridLayout.addWidget(self.button_update_continuous, 3, 1, 1, 1)
-        self.traces_to_show = QtWidgets.QComboBox(parent=self.dockWidgetContents)
-        self.gridLayout.addWidget(self.traces_to_show, 1, 0, 1, 2)
-        self.plotPlaceholderWidget_1 = self.canvas
-        self.gridLayout.addWidget(self.plotPlaceholderWidget_1, 0, 0, 1, 2)
-        self.tracesDockWidget.setWidget(self.dockWidgetContents)
-        MainWindow.addDockWidget(QtCore.Qt.DockWidgetArea(1), self.tracesDockWidget)
-        self.dockWidget_2 = QtWidgets.QDockWidget(parent=MainWindow)
-        self.dockWidgetContents_2 = QtWidgets.QWidget()
-        self.gridLayout_8 = QtWidgets.QGridLayout(self.dockWidgetContents_2)
-        self.widget_2 = QtWidgets.QWidget(parent=self.dockWidgetContents_2)
-        self.gridLayout_8.addWidget(self.widget_2, 0, 0, 1, 3)
-        self.coordinat_slider = QtWidgets.QSlider(parent=self.dockWidgetContents_2)
-        self.coordinat_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.gridLayout_8.addWidget(self.coordinat_slider, 3, 2, 1, 1)
-        self.combobox_plot_format = QtWidgets.QComboBox(parent=self.dockWidgetContents_2)
-        self.gridLayout_8.addWidget(self.combobox_plot_format, 1, 0, 1, 2)
-        self.checkbox_scatter = QtWidgets.QRadioButton(parent=self.dockWidgetContents_2)
-        self.gridLayout_8.addWidget(self.checkbox_scatter, 1, 2, 1, 1)
-        self.coordinate_label = QtWidgets.QLabel(parent=self.dockWidgetContents_2)
-        self.gridLayout_8.addWidget(self.coordinate_label, 3, 0, 1, 1)
-        self.textfield_frequency_label = QtWidgets.QLabel(parent=self.dockWidgetContents_2)
-        self.gridLayout_8.addWidget(self.textfield_frequency_label, 2, 0, 1, 1)
-        self.textfield_frequency_slider = QtWidgets.QSlider(parent=self.dockWidgetContents_2)
-        self.textfield_frequency_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
-        self.gridLayout_8.addWidget(self.textfield_frequency_slider, 2, 2, 1, 1)
-        self.textfield_frequency = QtWidgets.QLineEdit(parent=self.dockWidgetContents_2)
-        self.gridLayout_8.addWidget(self.textfield_frequency, 2, 1, 1, 1)
-        self.coordinate = QtWidgets.QLineEdit(parent=self.dockWidgetContents_2)
-        self.gridLayout_8.addWidget(self.coordinate, 3, 1, 1, 1)
-        self.horizontalLayout_2 = QtWidgets.QHBoxLayout()
 
-        self.button_save_current_points = QtWidgets.QPushButton(parent=self.dockWidgetContents_2)
-        self.horizontalLayout_2.addWidget(self.button_save_current_points)
-        self.button_save_all_points_at_frequency = QtWidgets.QPushButton(parent=self.dockWidgetContents_2)
-        self.horizontalLayout_2.addWidget(self.button_save_all_points_at_frequency)
-        self.button_save_all_points = QtWidgets.QPushButton(parent=self.dockWidgetContents_2)
-        self.horizontalLayout_2.addWidget(self.button_save_all_points)
-        self.gridLayout_8.addLayout(self.horizontalLayout_2, 4, 0, 1, 3)
-        self.dockWidget_2.setWidget(self.dockWidgetContents_2)
-        MainWindow.addDockWidget(QtCore.Qt.DockWidgetArea(2), self.dockWidget_2)
+        self.tracesDockWidget = QtWidgets.QDockWidget(parent=MainWindow)
+        self.tracesDockWidget.setWidget(VNAPlotWidget())
+        MainWindow.addDockWidget(QtCore.Qt.DockWidgetArea(2), self.tracesDockWidget)
+        self.tracesDockWidget.setWindowTitle("VNA traces")
+
+        self.scanDockWidget = QtWidgets.QDockWidget(parent=MainWindow)
+        self.scanDockWidget.setWidget(ScanPlotWidget())
+        MainWindow.addDockWidget(QtCore.Qt.DockWidgetArea(2), self.scanDockWidget)
+        self.scanDockWidget.setWindowTitle("Scanned points")
+
+        MainWindow.tabifyDockWidget(self.tracesDockWidget,self.scanDockWidget)
+
         self.actionReset = QtGui.QAction(parent=MainWindow)
         self.actionClose = QtGui.QAction(parent=MainWindow)
         self.actionAbout = QtGui.QAction(parent=MainWindow)
@@ -635,7 +674,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.menubar.addAction(self.menuHelp.menuAction())
 
         self.retranslateUi(MainWindow)
-        self.mainTabWidget.setCurrentIndex(3)
+        self.mainTabWidget.setCurrentIndex(0)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
 
@@ -658,16 +697,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.menuSettings.setTitle(_translate("MainWindow", "Settings"))
         self.menuHelp.setTitle(_translate("MainWindow", "Help"))
-        self.tracesDockWidget.setWindowTitle(_translate("MainWindow", "VNA traces"))
-        self.button_step.setText(_translate("MainWindow", "Plot"))
-        self.button_update_continuous.setText(_translate("MainWindow", "Step"))
-        self.dockWidget_2.setWindowTitle(_translate("MainWindow", "Scanned points"))
-        self.checkbox_scatter.setText(_translate("MainWindow", "RadioButton"))
-        self.coordinate_label.setText(_translate("MainWindow", "Change coordinate to (mm):"))
-        self.textfield_frequency_label.setText(_translate("MainWindow", "Change frequency to (GHz):"))
-        self.button_save_current_points.setText(_translate("MainWindow", "Save current slice as .txt"))
-        self.button_save_all_points_at_frequency.setText(_translate("MainWindow", "Save all points at current frequency as .txt"))
-        self.button_save_all_points.setText(_translate("MainWindow", "Save all points as .txt"))
+
         self.actionReset.setText(_translate("MainWindow", "Reset"))
         self.actionClose.setText(_translate("MainWindow", "Close"))
         self.actionAbout.setText(_translate("MainWindow", "About"))
