@@ -80,8 +80,6 @@ class ConnectionWidget(QtWidgets.QWidget):
         self.con_params_gridLayout.addItem(QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
                                                                  QtWidgets.QSizePolicy.Policy.Expanding), 7, 1, 1, 1)
 
-            
-
 class ManualControlWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, coordinate = '_'):
         super(ManualControlWidget, self).__init__(parent)
@@ -233,8 +231,20 @@ class ScanParametersWidget(QtWidgets.QWidget):
             for iw, w in enumerate(r):
                 self.scan_params_gridLayout.addWidget(w, ir, iw, 1, 1)
 
+        self.sttl_label = QtWidgets.QLabel()
+        self.sttl_label.setText("Settling time, s")
+        self.sttl_lineEdit = QtWidgets.QLineEdit()
+        self.sttl_label.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed,QtWidgets.QSizePolicy.Policy.Fixed)
+        self.sttl_lineEdit.setMaximumWidth(50)
+        sttl_layout = QtWidgets.QHBoxLayout()
+        sttl_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        sttl_layout.addWidget(self.sttl_label)
+        sttl_layout.addWidget(self.sttl_lineEdit)
+
         self.scan_params_VLayout.addWidget(self.scan_params_label)
         self.scan_params_VLayout.addLayout(self.scan_params_gridLayout)
+        self.scan_params_VLayout.addLayout(sttl_layout)
+
         size_policy = QtWidgets.QSizePolicy()
         self.setSizePolicy(size_policy)
 
@@ -280,27 +290,29 @@ class VNAParametersWidget(QtWidgets.QWidget):
 
         self.gridLayout = QtWidgets.QGridLayout()
         self.ifbw_label = QtWidgets.QLabel()
-        self.ifbw_label.setText("IF BW")
+        self.ifbw_label.setText("Filter bandwidth, Hz")
         self.ifbw_lineEdit = QtWidgets.QLineEdit()
         self.fmin_label = QtWidgets.QLabel()
-        self.fmin_label.setText("f min")
+        self.fmin_label.setText("Min frequency, Hz")
         self.fmin_lineEdit = QtWidgets.QLineEdit()
         self.fmax_label = QtWidgets.QLabel()
-        self.fmax_label.setText("f max")
+        self.fmax_label.setText("Max frequency, Hz")
         self.fmax_lineEdit = QtWidgets.QLineEdit()
         self.fstp_label = QtWidgets.QLabel()
-        self.fstp_label.setText("f step")
+        self.fstp_label.setText("Frequency points")
         self.fstp_lineEdit = QtWidgets.QLineEdit()
-        self.attn_label = QtWidgets.QLabel()
-        self.attn_label.setText("Attenuation")
-        self.attn_lineEdit = QtWidgets.QLineEdit()
-        self.sttl_label = QtWidgets.QLabel()
-        self.sttl_label.setText("Settling time")
-        self.sttl_lineEdit = QtWidgets.QLineEdit()
+        self.pwr_label = QtWidgets.QLabel()
+        self.pwr_label.setText("Power, dBm")
+        self.pwr_lineEdit = QtWidgets.QLineEdit()
+        self.avg_num_label = QtWidgets.QLabel()
+        self.avg_num_label.setText("Averaging samples")
+        self.avg_num_lineEdit = QtWidgets.QLineEdit()
         self.ab_checkBox = QtWidgets.QCheckBox()
         self.ab_checkBox.setText("A/B")
         self.fwbw_checkBox = QtWidgets.QCheckBox()
         self.fwbw_checkBox.setText("Frwd/Bckwd")
+        self.avg_checkBox = QtWidgets.QCheckBox()
+        self.avg_checkBox.setText("Averaging")
         self.pushButton = QtWidgets.QPushButton()
         self.pushButton.setText("Send to VNA")
 
@@ -312,12 +324,13 @@ class VNAParametersWidget(QtWidgets.QWidget):
         self.gridLayout.addWidget(self.fmax_lineEdit, 0, 5, 1, 1)
         self.gridLayout.addWidget(self.fstp_label, 0, 6, 1, 1)
         self.gridLayout.addWidget(self.fstp_lineEdit, 0, 7, 1, 1)
-        self.gridLayout.addWidget(self.attn_label, 1, 0, 1, 1)
-        self.gridLayout.addWidget(self.attn_lineEdit, 1, 1, 1, 1)
-        self.gridLayout.addWidget(self.sttl_label, 1, 2, 1, 1)
-        self.gridLayout.addWidget(self.sttl_lineEdit, 1, 3, 1, 1)
+        self.gridLayout.addWidget(self.pwr_label, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.pwr_lineEdit, 1, 1, 1, 1)
+        self.gridLayout.addWidget(self.avg_num_label, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.avg_num_lineEdit, 1, 3, 1, 1)
         self.gridLayout.addWidget(self.ab_checkBox, 1, 4, 1, 1)
         self.gridLayout.addWidget(self.fwbw_checkBox, 1, 5, 1, 1)
+        self.gridLayout.addWidget(self.avg_checkBox, 1, 6, 1, 1)
         self.gridLayout.addWidget(self.pushButton, 1, 7, 1, 1)
 
         self.VLayout.addLayout(self.gridLayout)
@@ -524,7 +537,7 @@ class ScanPlotWidget(PlotWidget):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
-        self.configs = Config()
+        self.configs = Config("aaa.toml")
         self.setupUi(self)
         self.vna_connected = False
         self.vna_parameters_widget.setEnabled(False)
@@ -534,16 +547,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.connection_widget.vna_ip_lineEdit.setText(self.configs.VNA_settings["ip"])
         self.connection_widget.con_vna_pushButton.clicked.connect(self.vna_connect_button_clicked)
 
-        RobotStopButton.group.buttonClicked.connect(lambda: self.append_log(f"Stop command sent to robot arm at {self.connection_widget.vna_ip_lineEdit.text()}"))
+        RobotStopButton.group.buttonClicked.connect(self.stop_button_clicked)
 
         self.timer = QtCore.QTimer()
         self.timer.setInterval(10)
         self.timer.stop()
         self.timer.timeout.connect(self.plot_update)
         self.toggle_var = False
+        self.vna_parameters_widget.pushButton.clicked.connect(self.send_to_vna_button_clicked)
         self.vna_plot_w.button_update_continuous.clicked.connect(self.toggle)
         self.vna_plot_w.button_step.clicked.connect(self.step_plot)
-        
+
     def append_log(self, text):
         self.connection_tab_log_widget.textBrowser.append(text)
         self.log.textBrowser.append(text)
@@ -558,6 +572,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.connection_widget.con_vna_pushButton.setText("Disconnect VNA")
                 self.connection_widget.con_vna_pushButton.setStyleSheet("background-color: red")
                 self.plot_initialize()
+                self.update_VNA_settings()
             except RsInstrument.RsInstrException:
                 print("no")
                 self.append_log("Connection Failed")
@@ -573,6 +588,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.toggle_var:
             self.toggle()
 
+    def stop_button_clicked(self):
+        self.append_log(f"Stop command sent to the VNA at {self.connection_widget.vna_ip_lineEdit.text()}")
+        if self.vna_connected:
+            self.vna_connect_button_clicked()
+
+    def send_to_vna_button_clicked(self):
+        self.set_VNA_settings()
+
+
     def query_data(self, ch, raw=False):
         """Returns the array of datapoints from the VNA.
         Formatted real values if raw is True, unformatted complex if false"""
@@ -587,7 +611,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax = self.vna_plot_w.figure.add_subplot(111)
         self.ax.set_xlabel('Frequency, GHz')
         self.ax.set_ylabel('S-parameters, dB')
-        self.instr.query_str_list("CONFigure:TRACe:CATalog?")
+        list_of_traces = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')
         self.configs.traces_to_show = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')[::2]
         self.traces = []
         self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
@@ -595,6 +619,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.traces.append(self.ax.plot(self.freq_arr, self.query_data(tr_n), label=f"trace {tr_n}")[0])
         self.ax.legend()
         self.vna_plot_w.figure.tight_layout()
+
+        self.vna_plot_w.traces_to_show.clear()       # delete all items from comboBox
+        self.vna_plot_w.traces_to_show.addItems(list_of_traces[1::2])
 
         # self.freq_select_vline = self.ax.axvline(self.textfield_frequency_slider.value() / 10)
 
@@ -609,10 +636,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_VNA_settings(self):
         try:
-            None
             new_bandwidth = self.vna_parameters_widget.ifbw_lineEdit.text()
+            new_fmin = self.vna_parameters_widget.fmin_lineEdit.text()
+            new_fmax = self.vna_parameters_widget.fmax_lineEdit.text()
             new_points = self.vna_parameters_widget.fstp_lineEdit.text()
-            # new_averaged = self.textfield_averaging.text()
+            new_power= self.vna_parameters_widget.pwr_lineEdit.text()
+            sweep_reverse = self.vna_parameters_widget.fwbw_checkBox.isChecked()
+            new_averaged_samples = self.vna_parameters_widget.avg_num_lineEdit.text()
+            averaging = self.vna_parameters_widget.avg_checkBox.isChecked()
             # if len(self.point_coordinates):
             #     dlg = FrequencyResolutionDialog()
             #     if dlg.exec():
@@ -623,10 +654,28 @@ class MainWindow(QtWidgets.QMainWindow):
             #         return
             if new_bandwidth != '':
                 self.instr.write(f'SENSe:BAND {float(new_bandwidth)}')
+            if new_fmin != '':
+                if float(new_fmin) >= self.configs.VNA_settings["min_fmin"]:
+                    self.instr.write(f'FREQuency:STARt {float(new_fmin)}')
+                else:
+                    self.append_log("Min frequency lower than the edge of the band")
+            if new_fmax != '':
+                if float(new_fmax) <= self.configs.VNA_settings["max_fmax"]:
+                    self.instr.write(f'FREQuency:STOP {float(new_fmax)}')
+                else:
+                    self.append_log("Max frequency higher than the edge of the band")
             if new_points != '':
                 self.instr.write(f'SWEep:POINts {int(new_points)}')
-            # if new_averaged != '':
-            #     self.instr.write(f'AVERage:COUNt {int(new_averaged)}')
+            if new_power != '':
+                if int(new_power) <= 8:
+                    self.instr.write(f'SOUR:POW {int(new_power)}')
+                else:
+                    self.append_log("Requested power is too high")
+            self.instr.write(f'SWEep:REVerse {["OFF","ON"][sweep_reverse]}')
+            self.instr.write(f'AVERage {["OFF", "ON"][averaging]}')
+            self.instr.write(f'AVERage:CLEar')
+            if new_averaged_samples != '':
+                self.instr.write(f'AVERage:COUNt {int(new_averaged_samples)}')
             self.update_VNA_settings()
             self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
             self.plot_initialize()
@@ -641,11 +690,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.configs.VNA_settings["point_number"] = self.instr.query_int('SWEep:POINts?')
         self.configs.VNA_settings["time_per_sweep"] = self.instr.query_float('SWEep:TIMe?')
         self.configs.VNA_settings["averaged_samples"] = self.instr.query_int('AVERage:COUNt?')
+        self.configs.VNA_settings["minimum_frequency"] = self.instr.query_int('FREQuency:STARt?')
+        self.configs.VNA_settings["maximum_frequency"] = self.instr.query_int('FREQuency:STOP?')
+        self.configs.VNA_settings["power"] = self.instr.query_int('SOURce:POWer?')
+        self.configs.VNA_settings["reversed_sweep"] = self.instr.query_bool('SWEep:REVerse?')
+        self.configs.VNA_settings['averaged_samples'] = self.instr.query_int("AVERage:COUNt?")
+        self.configs.VNA_settings["averaging_on/off"] = self.instr.query_bool('AVERage?')
         # self.VNA_settings.setText(
         #     f"Bandwidth: {str(self.configs.VNA_settings['bandwidth']) + ' Hz' if float(self.configs.VNA_settings['bandwidth']) < 1000 else '{:.0f} kHz'.format(self.configs.VNA_settings['bandwidth'] / 1e3)}  "
         #     f"\nNumber of points: {self.configs.VNA_settings['point_number']} "
         #     f"\nAveraged samples: {self.configs.VNA_settings['averaged_samples']} "
         #     f"\nSeconds per sweep: {self.configs.VNA_settings['time_per_sweep']}")
+        self.vna_parameters_widget.ifbw_lineEdit.setText(f'{self.configs.VNA_settings["bandwidth"]:.4g}')
+        self.vna_parameters_widget.fmin_lineEdit.setText(f'{self.configs.VNA_settings["minimum_frequency"]:.4g}')
+        self.vna_parameters_widget.fmax_lineEdit.setText(f'{self.configs.VNA_settings["maximum_frequency"]:.4g}')
+        self.vna_parameters_widget.fstp_lineEdit.setText(f'{self.configs.VNA_settings["point_number"]:.4g}')
+        self.vna_parameters_widget.pwr_lineEdit.setText(str(self.configs.VNA_settings["power"]))
+        self.vna_parameters_widget.fwbw_checkBox.setChecked(self.configs.VNA_settings["reversed_sweep"])
+        self.vna_parameters_widget.avg_checkBox.setChecked(self.configs.VNA_settings["averaging_on/off"])
+        self.vna_parameters_widget.avg_num_lineEdit.setText(str(self.configs.VNA_settings["averaged_samples"]))
         self.configs.save_toml("latest_settings.toml")
 
     def button_text_update(self):
