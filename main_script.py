@@ -634,6 +634,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
 
         self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
+
+        self.run_on_robot = False
+        self.robot_start_widget.simulate_pushButton.clicked.connect(self.run_program_in_sim)
+        self.robot_start_widget.run_pushButton.clicked.connect(self.run_program_on_robot)
     def minus_button_pressed(self):
         a = [x.radioButton.text() for x in self.coordinates_widgets_list]
         b = [x.radioButton.isChecked() for x in self.coordinates_widgets_list].index(True)
@@ -729,6 +733,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
         except ValueError:
             print('Inputted value is invalid')
+
+    def run_program_on_robot(self):
+        self.run_on_robot = True
+        self.robot_rdk.run_on_robot(self.configs.robot_settings['ip'],
+                                                 self.configs.robot_settings['port'])
+
+
+    def run_program_in_sim(self):
+        self.run_on_robot = False
+        self.robot_rdk.setRunMode(1)  #  RUNMODE_SIMULATE = 1
 
 
 
