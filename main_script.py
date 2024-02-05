@@ -6,6 +6,9 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 import RsInstrument
 from skuggsja_config import Config
+from robodk_functions import RDK_KUKA
+import numpy as np
+import threading
 
 def msgtoarr(s):
     return np.fromstring(s, sep=',')
@@ -51,6 +54,8 @@ class ConnectionWidget(QtWidgets.QWidget):
         self.vna_ip_lineEdit = QtWidgets.QLineEdit()
         self.robot_port_label = QtWidgets.QLabel()
 
+        self.vna_ip_lineEdit.setEchoMode(QtWidgets.QLineEdit.EchoMode.NoEcho)
+
         self.robot_ip_label.setText("Robot IP")
         self.robot_port_label.setText("Robot Port")
         self.vna_ip_label.setText("VNA IP")
@@ -81,28 +86,35 @@ class ConnectionWidget(QtWidgets.QWidget):
                                                                  QtWidgets.QSizePolicy.Policy.Expanding), 7, 1, 1, 1)
 
 class ManualControlWidget(QtWidgets.QWidget):
+    group_minus = QtWidgets.QButtonGroup()
+    group_plus = QtWidgets.QButtonGroup()
+
     def __init__(self, parent=None, coordinate = '_'):
         super(ManualControlWidget, self).__init__(parent)
         layout = QtWidgets.QGridLayout()
+        self.coordinate = coordinate
 
-        self.radioButton = QtWidgets.QRadioButton(parent=parent)
-        self.step_label = QtWidgets.QLabel(parent=parent)
-        self.step_textEdit = QtWidgets.QLineEdit(parent=parent)
-        self.step_textEdit.setMaximumSize(QtCore.QSize(40, 30))
-        self.horizontalSlider = QtWidgets.QSlider(parent=parent)
+        self.radioButton = QtWidgets.QRadioButton()
+        self.step_label = QtWidgets.QLabel()
+        self.step_lineEdit = QtWidgets.QLineEdit()
+        self.step_lineEdit.setMaximumSize(QtCore.QSize(40, 30))
+        self.horizontalSlider = QtWidgets.QSlider()
         self.horizontalSlider.setMaximum(100)
         self.horizontalSlider.setProperty("value", 50)
         self.horizontalSlider.setOrientation(QtCore.Qt.Orientation.Horizontal)
         self.horizontalSlider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
-        self.man_label = QtWidgets.QLabel(parent=parent)
-        self.man_textEdit = QtWidgets.QLineEdit(parent=parent)
-        self.man_textEdit.setMaximumSize(QtCore.QSize(60, 30))
-        self.pos_fdbk_label = QLabelFramed(parent=parent)
-        self.dlabel = QtWidgets.QLabel(parent=parent)
-        self.dfdbk_label = QtWidgets.QLabel(parent=parent)
-        self.dfdbk_label.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
-        self.dfdbk_label.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        self.dfdbk_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        
+        self.minus_pushButton = QtWidgets.QPushButton()
+        self.plus_pushButton = QtWidgets.QPushButton()
+        ManualControlWidget.group_minus.addButton(self.minus_pushButton)
+        ManualControlWidget.group_plus.addButton(self.plus_pushButton)
+
+        self.man_label = QtWidgets.QLabel()
+        self.man_lineEdit = QtWidgets.QLineEdit()
+        self.man_lineEdit.setMaximumSize(QtCore.QSize(60, 30))
+        self.pos_fdbk_label = QLabelFramed()
+        self.dlabel = QtWidgets.QLabel()
+        self.dfdbk_label = QLabelFramed()
 
         self.step_label.setText(f"s{coordinate}")
         self.man_label.setText(f"{coordinate}man")
@@ -110,30 +122,36 @@ class ManualControlWidget(QtWidgets.QWidget):
         self.dfdbk_label.setText("TextLabel")
         self.radioButton.setText(coordinate)
         self.dlabel.setText("d"+coordinate)
+        self.minus_pushButton.setText("-")
+        self.minus_pushButton.setStyleSheet("font-weight: bold;")
+        self.plus_pushButton.setText("+")
+        self.plus_pushButton.setStyleSheet("font-weight: bold")
 
         layout.addWidget(self.radioButton, 0, 0, 1, 1)
         layout.addWidget(self.step_label, 0, 1, 1, 1)
-        layout.addWidget(self.step_textEdit, 0, 2, 1, 1)
+        layout.addWidget(self.step_lineEdit, 0, 2, 1, 1)
         layout.addWidget(self.horizontalSlider, 0, 3, 1, 1)
         layout.addWidget(self.man_label, 0, 4, 1, 1)
-        layout.addWidget(self.man_textEdit, 0, 5, 1, 1)
+        layout.addWidget(self.man_lineEdit, 0, 5, 1, 1)
         layout.addWidget(self.pos_fdbk_label, 0, 6, 1, 1)
         layout.addWidget(self.dlabel, 0, 7, 1, 1)
         layout.addWidget(self.dfdbk_label, 0, 8, 1, 1)
 
         self.radioButton.toggled.connect(self.radio_button_check)
-        self.man_textEdit.returnPressed.connect(lambda: self.set_slider(self.man_textEdit, self.horizontalSlider))
+        self.man_lineEdit.returnPressed.connect(lambda: self.set_slider(self.man_lineEdit, self.horizontalSlider))
         self.horizontalSlider.valueChanged.connect(self.slider_changed)
-        # self.man_textEdit.textChanged.connect(lambda : print(self.man_textEdit.text()))
+        # self.man_lineEdit.textChanged.connect(lambda : print(self.man_lineEdit.text()))
 
         self.setLayout(layout)
 
         self.widget_touple = (self.radioButton,
         self.step_label,
-        self.step_textEdit,
+        self.step_lineEdit,
         self.horizontalSlider,
+        self.minus_pushButton,
+        self.plus_pushButton,
         self.man_label,
-        self.man_textEdit,
+        self.man_lineEdit,
         self.pos_fdbk_label,
         self.dlabel,
         self.dfdbk_label)
@@ -160,7 +178,37 @@ class ManualControlWidget(QtWidgets.QWidget):
 
     def slider_changed(self):
         self.new_val = self.horizontalSlider.value() / 10
-        self.man_textEdit.setText(str(self.new_val))
+        self.man_lineEdit.setText(str(self.new_val))
+        
+        
+class RobotControlsWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(RobotControlsWidget, self).__init__(parent)
+        self.VLayout = QtWidgets.QVBoxLayout(self)
+        gridLayout = QtWidgets.QGridLayout()
+        self.stop_pushButton = RobotStopButton()
+
+        self.man_speed_label = QtWidgets.QLabel()
+        self.man_speed_lineEdit = QtWidgets.QLineEdit()
+        self.position_reset_pushButton = QtWidgets.QPushButton()
+        self.set_scan_init_pushButton = QtWidgets.QPushButton()
+
+        self.man_speed_label.setText("Manual movement speed")
+        self.man_speed_lineEdit.setText("5")
+        self.position_reset_pushButton.setText("Reset robot position")
+        self.set_scan_init_pushButton.setText("Set new scan origin point")
+
+        gridLayout.addWidget(self.man_speed_label,0,0,1,1)
+        gridLayout.addWidget(self.man_speed_lineEdit, 0, 1, 1, 1)
+        gridLayout.addWidget(self.position_reset_pushButton, 1, 0, 1, 1)
+        gridLayout.addWidget(self.set_scan_init_pushButton, 1, 1, 1, 1)
+        self.VLayout.addLayout(gridLayout)
+        self.VLayout.addWidget(self.stop_pushButton)
+
+        size_policy = QtWidgets.QSizePolicy()
+        self.setSizePolicy(size_policy)
+        
+        
 
 class ScanParametersWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, type = "XYZ scan"):
@@ -241,9 +289,13 @@ class ScanParametersWidget(QtWidgets.QWidget):
         sttl_layout.addWidget(self.sttl_label)
         sttl_layout.addWidget(self.sttl_lineEdit)
 
+        self.scan_start_pushButton = QtWidgets.QPushButton()
+        self.scan_start_pushButton.setText("Start scan")
+
         self.scan_params_VLayout.addWidget(self.scan_params_label)
         self.scan_params_VLayout.addLayout(self.scan_params_gridLayout)
         self.scan_params_VLayout.addLayout(sttl_layout)
+        self.scan_params_VLayout.addWidget(self.scan_start_pushButton)
 
         size_policy = QtWidgets.QSizePolicy()
         self.setSizePolicy(size_policy)
@@ -266,7 +318,12 @@ class ScanParametersWidget(QtWidgets.QWidget):
         
         for ir, row in enumerate(self.params_rows[2:]):
             for iw, w in enumerate(row[::2]):
-                w.setText(["{}max", "{}min", "{}step"][iw].format(coordinates[ir]))
+                w.setText(["{}min", "{}max", "{}step"][iw].format(coordinates[ir]))
+
+            for iw, w in enumerate(row[1::2]):
+                side = 10
+                steps = 1
+                w.setText([f"{-side}", f"{side}", f"{steps}"][iw])
 
         if scan_type == "Spherical scan":
             self.params_rows[2][0].setText(coordinates[0])
@@ -533,6 +590,8 @@ class ScanPlotWidget(PlotWidget):
         self.VLayout.addLayout(self.gridLayout)
         self.VLayout.addLayout(self.horizontalLayout)
 
+        self.ax_scan = self.figure.add_subplot(111)
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, obj=None, **kwargs):
@@ -543,9 +602,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.vna_parameters_widget.setEnabled(False)
         self.vna_plot_w.setEnabled(False)
 
-        print(self.configs.VNA_settings)
+        self.robot_connected = False
+        for w in (self.manualCTab,self.scan_parameters_widget):
+            w.setEnabled(False)
+
         self.connection_widget.vna_ip_lineEdit.setText(self.configs.VNA_settings["ip"])
         self.connection_widget.con_vna_pushButton.clicked.connect(self.vna_connect_button_clicked)
+        self.connection_widget.con_robot_pushButton.clicked.connect(self.robot_connect_button_clicked)
 
         RobotStopButton.group.buttonClicked.connect(self.stop_button_clicked)
 
@@ -558,9 +621,145 @@ class MainWindow(QtWidgets.QMainWindow):
         self.vna_plot_w.button_update_continuous.clicked.connect(self.toggle)
         self.vna_plot_w.button_step.clicked.connect(self.step_plot)
 
+        self.move_timer = QtCore.QTimer()
+        self.move_timer.setInterval(1)
+        self.move_timer.timeout.connect(self.move_timer_func)
+        self.manual_direction = "+Z"
+        ManualControlWidget.group_minus.buttonPressed.connect(self.minus_button_pressed)
+        ManualControlWidget.group_plus.buttonPressed.connect(self.plus_button_pressed)
+        ManualControlWidget.group_minus.buttonReleased.connect(self.manual_button_released)
+        ManualControlWidget.group_plus.buttonReleased.connect(self.manual_button_released)
+
+        self.robot_controls_widget.position_reset_pushButton.clicked.connect(self.position_reset_button_clicked)
+        self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
+
+        self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
+    def minus_button_pressed(self):
+        a = [x.radioButton.text() for x in self.coordinates_widgets_list]
+        b = [x.radioButton.isChecked() for x in self.coordinates_widgets_list].index(True)
+        self.manual_direction = ("-" + a[b])
+        self.move_timer.start()
+
+    def plus_button_pressed(self):
+        a = [x.radioButton.text() for x in self.coordinates_widgets_list]
+        b = [x.radioButton.isChecked() for x in self.coordinates_widgets_list].index(True)
+        self.manual_direction = ("+" + a[b])
+        self.move_timer.start()
+
+    def manual_button_released(self):
+        self.move_timer.stop()
+
+    def move_timer_func(self):
+        # print(self.manual_direction)
+        try:
+            dict = {"+X":(1,0,0),"+Y":(0,1,0),"+Z":(0,0,1),
+                    "-X":(-1,0,0),"-Y":(0,-1,0),"-Z":(0,0,-1),
+                    "+A": (0, 0, 0, 1, 0, 0), "+B": (0, 0, 0, 0, 1, 0), "+C": (0, 0, 0, 0, 0, 1),
+                    "-A": (0, 0, 0, -1, 0, 0), "-B": (0, 0, 0, 0, -1, 0), "-C": (0, 0, 0, 0, 0, -1)}
+            speed = float(self.robot_controls_widget.man_speed_lineEdit.text())
+            self.current_robot_pose = self.robot_rdk.move_relative([x*speed for x in dict[self.manual_direction]])
+            self.update_current_robot_pose()
+        except ValueError:
+            print('Inputted value is invalid')
+    def update_current_robot_pose(self):
+        for i,w in enumerate(self.coordinates_widgets_list):
+            w.pos_fdbk_label.setText(f"{self.current_robot_pose[i]:.0f}")
+        for i, x in enumerate(self.current_robot_pose):
+            self.feedback_widget.params_rows[i//3][(i%3)*2+1].setText(f"{x:.0f}")
+
+    def position_reset_button_clicked(self):
+        self.robot_rdk.move_to_initial()
+
+    def set_scan_init_button_clicked(self):
+        self.scan_init = self.robot_rdk.set_scan_initial()
+        w_list = [self.scan_parameters_widget.origin_params_w_list,
+                  self.scan_parameters_widget.orientation_params_w_list]
+        for i, x in enumerate(self.scan_init):
+            w_list[i//3][(i%3)*2+1].setText(f"{x:.3f}")
+
+    def begin_scan(self):
+        x = threading.Thread(target=self.scan_xyz)
+        x.start()
+        # self.scan_xyz()
+
+    def scan_xyz(self):
+        try:
+            points_axes = []
+            shape = []
+            for param in self.scan_parameters_widget.params_rows[2:]:
+                min = float(param[1].text())
+                max = float(param[3].text())
+                steps = int(param[5].text())
+                shape.append(steps)
+                points_axes.append(np.linspace(min,max,steps))
+            dir_x = 1
+            dir_y = 1
+            dir_z = 1
+            data = np.empty(shape)
+            X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
+            data[:] = np.nan
+            for iz, z in enumerate(points_axes[2]):
+                for iy, y in enumerate(points_axes[1][::dir_y]):
+                    for ix, x in enumerate(points_axes[0][::dir_x]):
+                        print(x,y,z)
+                        self.robot_rdk.robot.setPoseFrame(self.robot_rdk.frame_scan_init)
+                        self.robot_rdk.move_target(self.robot_rdk.target_scan, (x,y,z))
+                        self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan.Pose())
+                        self.robot_rdk.robot.setPoseFrame(self.robot_rdk.robot.Parent())
+                        data_point = self.query_data(2)[0]
+
+
+                        data[ix*dir_x-(1 if dir_x<0 else 0),
+                             iy*dir_y-(1 if dir_y<0 else 0),
+                             iz] = data_point
+                        print(data)
+
+                        self.scan_plot_w.ax_scan.clear()
+                        self.scan_plot_w.ax_scan.pcolor(Y_grid,X_grid,data[:, :, 0].T,shading='nearest')
+                        self.scan_plot_w.canvas.draw()
+                    dir_x *= -1
+                dir_y *= -1
+            print(data)
+
+            # self.scan_plot_w.ax_scan.clear()
+            # self.scan_plot_w.ax_scan.pcolor(data[:, :, 0])
+            # self.scan_plot_w.canvas.draw()
+
+
+
+        except ValueError:
+            print('Inputted value is invalid')
+
+
+
+
     def append_log(self, text):
         self.connection_tab_log_widget.textBrowser.append(text)
         self.log.textBrowser.append(text)
+
+    def robot_connect_button_clicked(self):
+        if not self.robot_connected:
+            try:
+                self.robot_rdk = RDK_KUKA(quit_on_close = True)
+                self.append_log("Succesfully connected to RoboDK")
+                self.robot_connected = True
+                self.connection_widget.con_robot_pushButton.setText("Disconnect robot")
+                self.connection_widget.con_robot_pushButton.setStyleSheet("background-color: red")
+            finally:
+                pass
+            # except RsInstrument.RsInstrException:
+            #     print("no")
+            #     self.append_log("Connection Failed")
+            #     self.vna_connected = False
+        elif self.robot_connected:
+            self.robot_rdk.Disconnect()
+            self.append_log("RoboDK session closed")
+            self.robot_connected = False
+            self.connection_widget.con_robot_pushButton.setText("Connect robot")
+            self.connection_widget.con_robot_pushButton.setStyleSheet("background-color: light gray")
+        for w in (self.manualCTab,self.scan_parameters_widget):
+            w.setEnabled(self.robot_connected)
+
 
     def vna_connect_button_clicked(self):
         if not self.vna_connected:
@@ -592,6 +791,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.append_log(f"Stop command sent to the VNA at {self.connection_widget.vna_ip_lineEdit.text()}")
         if self.vna_connected:
             self.vna_connect_button_clicked()
+        if self.robot_connected:
+            self.robot_connect_button_clicked()
 
     def send_to_vna_button_clicked(self):
         self.set_VNA_settings()
@@ -769,25 +970,25 @@ class MainWindow(QtWidgets.QMainWindow):
             for iw, widget in enumerate(self.coordinates_widgets_list[ic].getwidgets()):
                 self.man_move_gridLayout.addWidget(widget, 1+ic,iw,1,1)
 
-        self.man_select_label = QtWidgets.QLabel(parent=manualCTab)
+        self.man_select_label = QtWidgets.QLabel()
         self.man_select_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_select_label, 0, 0, 1, 1)
         self.man_select_label.setMaximumHeight(30)
-        self.man_step_label = QtWidgets.QLabel(parent=manualCTab)
+        self.man_step_label = QtWidgets.QLabel()
         self.man_step_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_step_label, 0, 2, 1, 1)
-        self.man_pos_label = QtWidgets.QLabel(parent=manualCTab)
+        self.man_pos_label = QtWidgets.QLabel()
         self.man_pos_label.setStyleSheet("font-weight: bold")
         self.man_move_gridLayout.addWidget(self.man_pos_label, 0, 3, 1, 1)
-        self.man_input_label = QtWidgets.QLabel(parent=manualCTab)
+        self.man_input_label = QtWidgets.QLabel()
         self.man_input_label.setStyleSheet("font-weight: bold")
-        self.man_move_gridLayout.addWidget(self.man_input_label, 0, 5, 1, 1)
-        self.man_pos_fdbk_label = QtWidgets.QLabel(parent=manualCTab)
+        self.man_move_gridLayout.addWidget(self.man_input_label, 0, 7, 1, 1)
+        self.man_pos_fdbk_label = QtWidgets.QLabel()
         self.man_pos_fdbk_label.setStyleSheet("font-weight: bold")
-        self.man_move_gridLayout.addWidget(self.man_pos_fdbk_label, 0, 6, 1, 1)
-        self.man_pos_real_fdbk_label = QtWidgets.QLabel(parent=manualCTab)
+        self.man_move_gridLayout.addWidget(self.man_pos_fdbk_label, 0, 8, 1, 1)
+        self.man_pos_real_fdbk_label = QtWidgets.QLabel()
         self.man_pos_real_fdbk_label.setStyleSheet("font-weight: bold")
-        self.man_move_gridLayout.addWidget(self.man_pos_real_fdbk_label, 0, 8, 1, 1)
+        self.man_move_gridLayout.addWidget(self.man_pos_real_fdbk_label, 0, 10, 1, 1)
 
         self.man_step_label.setText("Step size")
         self.man_pos_label.setText("Position Selection")
@@ -798,8 +999,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
         self.man_main_VLayout.addLayout(self.man_move_gridLayout)
-        self.man_stop_pushButton = RobotStopButton(parent=manualCTab)
-        self.man_main_VLayout.addWidget(self.man_stop_pushButton)
+
+        self.robot_controls_widget = RobotControlsWidget()
+        self.man_main_VLayout.addWidget(self.robot_controls_widget)
 
         self.gridLayout_4.addLayout(self.man_main_VLayout, 0, 0, 1, 1)
         spacerItem1 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
@@ -915,6 +1117,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         MainWindow.setWindowTitle("Main Window")
         self.mainTabWidget.setCurrentIndex(0)
+
+    def closeEvent(self, event):
+        self.stop_button_clicked()
+        super(MainWindow, self).closeEvent(event)
 
 
 if __name__ == '__main__':

@@ -9,7 +9,7 @@ import os
 RDK = Robolink()
 
 # Get the robot (first robot found):
-robot = RDK.Item('KUKA KR 6 R900-2', ITEM_TYPE_ROBOT)
+robot = RDK.Item('KUKA-KR-6-R900-2', ITEM_TYPE_ROBOT)
 if not robot.Valid():
     raise Exception('No robot selected or available')
 
