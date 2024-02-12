@@ -54,7 +54,7 @@ class ConnectionWidget(QtWidgets.QWidget):
         self.vna_ip_lineEdit = QtWidgets.QLineEdit()
         self.robot_port_label = QtWidgets.QLabel()
 
-        self.vna_ip_lineEdit.setEchoMode(QtWidgets.QLineEdit.EchoMode.NoEcho)
+        # self.vna_ip_lineEdit.setEchoMode(QtWidgets.QLineEdit.EchoMode.NoEcho)
 
         self.robot_ip_label.setText("Robot IP")
         self.robot_port_label.setText("Robot Port")
@@ -63,7 +63,7 @@ class ConnectionWidget(QtWidgets.QWidget):
         self.ping_robot_pushButton.setText("Ping Robot")
         self.ping_vna_pushButton.setText("Ping VNA")
         self.con_vna_pushButton.setText("Connect VNA")
-        self.con_robot_pushButton.setText("Connect Robot")
+        self.con_robot_pushButton.setText("Run RoboDK")
         self.disconnect_pushButton.setText("Disconnect both")
 
         self.con_params_gridLayout.addWidget(self.robot_ip_label, 0, 0, 1, 1)
@@ -188,18 +188,35 @@ class RobotControlsWidget(QtWidgets.QWidget):
         gridLayout = QtWidgets.QGridLayout()
         self.stop_pushButton = RobotStopButton()
 
-        self.man_speed_label = QtWidgets.QLabel()
-        self.man_speed_lineEdit = QtWidgets.QLineEdit()
+        self.man_step_label = QtWidgets.QLabel()
+        self.man_step_lineEdit = QtWidgets.QLineEdit()
+        self.robot_joint_speed_label = QtWidgets.QLabel()
+        self.robot_joint_speed_lineEdit = QtWidgets.QLineEdit()
+        self.robot_joint_accel_label = QtWidgets.QLabel()
+        self.robot_joint_accel_lineEdit = QtWidgets.QLineEdit()
         self.position_reset_pushButton = QtWidgets.QPushButton()
         self.set_scan_init_pushButton = QtWidgets.QPushButton()
+        self.set_robot_speed_pushButton = QtWidgets.QPushButton()
+        self.robot_joint_speed_lineEdit.setMaximumWidth(40)
+        self.robot_joint_accel_lineEdit.setMaximumWidth(40)
 
-        self.man_speed_label.setText("Manual movement speed")
-        self.man_speed_lineEdit.setText("5")
+        self.man_step_label.setText("Manual movement step")
+        self.man_step_lineEdit.setText("5")
+        self.robot_joint_speed_label.setText("Joints speed")
+        self.robot_joint_accel_label.setText("Joints acceleration")
+        self.robot_joint_speed_lineEdit.setText("1")
+        self.robot_joint_accel_lineEdit.setText("1")
         self.position_reset_pushButton.setText("Reset robot position")
         self.set_scan_init_pushButton.setText("Set new scan origin point")
+        self.set_robot_speed_pushButton.setText("Set robot speed")
 
-        gridLayout.addWidget(self.man_speed_label,0,0,1,1)
-        gridLayout.addWidget(self.man_speed_lineEdit, 0, 1, 1, 1)
+        gridLayout.addWidget(self.man_step_label,0,0,1,1)
+        gridLayout.addWidget(self.man_step_lineEdit, 0, 1, 1, 1)
+        gridLayout.addWidget(self.robot_joint_speed_label, 0, 2, 1, 1)
+        gridLayout.addWidget(self.robot_joint_speed_lineEdit, 0, 3, 1, 1)
+        gridLayout.addWidget(self.robot_joint_accel_label, 0, 4, 1, 1)
+        gridLayout.addWidget(self.robot_joint_accel_lineEdit, 0, 5, 1, 1)
+        gridLayout.addWidget(self.set_robot_speed_pushButton, 1, 3, 1, 2)
         gridLayout.addWidget(self.position_reset_pushButton, 1, 0, 1, 1)
         gridLayout.addWidget(self.set_scan_init_pushButton, 1, 1, 1, 1)
         self.VLayout.addLayout(gridLayout)
@@ -632,6 +649,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.robot_controls_widget.position_reset_pushButton.clicked.connect(self.position_reset_button_clicked)
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
+        self.robot_controls_widget.set_robot_speed_pushButton.clicked.connect(self.set_robot_speed)
 
         self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
 
@@ -660,7 +678,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     "-X":(-1,0,0),"-Y":(0,-1,0),"-Z":(0,0,-1),
                     "+A": (0, 0, 0, 1, 0, 0), "+B": (0, 0, 0, 0, 1, 0), "+C": (0, 0, 0, 0, 0, 1),
                     "-A": (0, 0, 0, -1, 0, 0), "-B": (0, 0, 0, 0, -1, 0), "-C": (0, 0, 0, 0, 0, -1)}
-            speed = float(self.robot_controls_widget.man_speed_lineEdit.text())
+            speed = float(self.robot_controls_widget.man_step_lineEdit.text())
             self.current_robot_pose = self.robot_rdk.move_relative([x*speed for x in dict[self.manual_direction]])
             self.update_current_robot_pose()
         except ValueError:
@@ -744,7 +762,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_on_robot = False
         self.robot_rdk.setRunMode(1)  #  RUNMODE_SIMULATE = 1
 
-
+    def set_robot_speed(self):
+        try:
+            j_speed = float(self.robot_controls_widget.robot_joint_speed_lineEdit.text())
+            j_accel = float(self.robot_controls_widget.robot_joint_accel_lineEdit.text())
+            self.robot_rdk.robot.setSpeed(speed_linear=-1,speed_joints=j_speed,accel_joints=j_accel)
+        except ValueError:
+            print('Inputted value is invalid')
 
 
     def append_log(self, text):
@@ -773,6 +797,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.connection_widget.con_robot_pushButton.setStyleSheet("background-color: light gray")
         for w in (self.manualCTab,self.scan_parameters_widget):
             w.setEnabled(self.robot_connected)
+
 
 
     def vna_connect_button_clicked(self):
