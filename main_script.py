@@ -213,6 +213,7 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.robot_joint_accel_label = QtWidgets.QLabel()
         self.robot_joint_accel_lineEdit = QtWidgets.QLineEdit()
         self.position_reset_pushButton = QtWidgets.QPushButton()
+        self.position_reset_cross_pushButton = QtWidgets.QPushButton()
         self.set_scan_init_pushButton = QtWidgets.QPushButton()
         self.set_robot_speed_pushButton = QtWidgets.QPushButton()
         self.robot_joint_speed_lineEdit.setMaximumWidth(40)
@@ -225,6 +226,7 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.robot_joint_speed_lineEdit.setText("10")
         self.robot_joint_accel_lineEdit.setText("10")
         self.position_reset_pushButton.setText("Reset robot position")
+        self.position_reset_cross_pushButton.setText("Reset robot position (cross)")
         self.set_scan_init_pushButton.setText("Set new scan origin point")
         self.set_robot_speed_pushButton.setText("Set robot speed")
 
@@ -236,6 +238,7 @@ class RobotControlsWidget(QtWidgets.QWidget):
         gridLayout.addWidget(self.robot_joint_accel_lineEdit, 0, 5, 1, 1)
         gridLayout.addWidget(self.set_robot_speed_pushButton, 1, 3, 1, 2)
         gridLayout.addWidget(self.position_reset_pushButton, 1, 0, 1, 1)
+        gridLayout.addWidget(self.position_reset_cross_pushButton, 2, 0, 1, 1)
         gridLayout.addWidget(self.set_scan_init_pushButton, 1, 1, 1, 1)
         self.VLayout.addLayout(gridLayout)
         self.VLayout.addWidget(self.stop_pushButton)
@@ -670,6 +673,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.coord_update_timer.timeout.connect(self.coord_update_func)
 
         self.robot_controls_widget.position_reset_pushButton.clicked.connect(self.position_reset_button_clicked)
+        self.robot_controls_widget.position_reset_cross_pushButton.clicked.connect(self.position_reset_cross_button_clicked)
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
         self.robot_controls_widget.set_robot_speed_pushButton.clicked.connect(self.set_robot_speed)
 
@@ -737,9 +741,21 @@ class MainWindow(QtWidgets.QMainWindow):
         for i, x in enumerate(self.current_robot_pose):
             self.feedback_widget.params_rows[i//3][(i%3)*2+1].setText(f"{x:.0f}")
 
-    @synchronized
+
     def position_reset_button_clicked(self):
-        self.robot_rdk.move_to_initial()
+        self.send_robot_to_initial("H")
+
+    def position_reset_cross_button_clicked(self):
+        self.send_robot_to_initial("V")
+
+    @synchronized
+    def send_robot_to_initial(self, pol ="H"):
+        if pol == "H":
+            self.robot_rdk.robot.MoveJ(self.robot_rdk.target_init.Joints())
+        elif pol == "V":
+            self.robot_rdk.robot.MoveJ(self.robot_rdk.target_init_cross.Joints())
+        else:
+            pass
 
     def set_scan_init_button_clicked(self):
         self.scan_init = self.robot_rdk.set_scan_initial()
@@ -830,7 +846,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def robot_connect_button_clicked(self):
         if not self.robot_connected:
             try:
-                self.robot_rdk = RDK_KUKA(quit_on_close = True)
+                self.robot_rdk = RDK_KUKA(quit_on_close = True, joints=self.configs.robot_settings["joints"])
                 self.append_log("Succesfully connected to RoboDK")
                 self.robot_connected = True
                 self.connection_widget.con_robot_pushButton.setText("Disconnect robot")

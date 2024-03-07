@@ -11,12 +11,18 @@ class RDK_KUKA(Robolink):
         self.AddFile("KUKA-KR-6-R900-2.robot")
         self.robot = self.ItemUserPick('KUKA KR 6 R900 2', ITEM_TYPE_ROBOT)
         self.robot.setSpeed(-1,20)  # Set linear speed in mm/s, joints speed in deg/s
+        if coordinates != None or joints != None:
+            if joints != None:
+                self.robot.setJoints(joints)
+            else:
+                self.robot.setPose(KUKA_2_Pose(coordinates))
         self.Command("FitAll")
         self.AddTarget('Target initial')
         self.AddTarget('Target initial cross')
         self.target_init = self.Item('Target initial')
         self.target_init_cross = self.Item('Target initial cross')
         self.target_init_cross.setAsJointTarget()
+        self.target_init.setAsJointTarget()
         if coordinates != None or joints != None:
             if joints != None:
                 self.target_init.setJoints(joints)
