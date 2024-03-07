@@ -7,8 +7,26 @@ from matplotlib.figure import Figure
 import RsInstrument
 from skuggsja_config import Config
 from robodk_functions import RDK_KUKA
+import robodk.robomath as robomath
 import numpy as np
 import threading
+import functools
+
+def synchronized(f):
+    @functools.wraps(f)
+    def new_function(self, *args, **kw):
+        lock = self.movement_lock
+        if not lock.locked():
+            lock.acquire()
+            self.statusbar.setStyleSheet("background-color: red")
+            try:
+               return f(self, *args, **kw)
+            finally:
+                lock.release()
+                self.statusbar.setStyleSheet("background-color: green")
+        else:
+            print("Another function is already controlling the robot")
+    return new_function
 
 def msgtoarr(s):
     return np.fromstring(s, sep=',')
@@ -204,8 +222,8 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.man_step_lineEdit.setText("5")
         self.robot_joint_speed_label.setText("Joints speed")
         self.robot_joint_accel_label.setText("Joints acceleration")
-        self.robot_joint_speed_lineEdit.setText("1")
-        self.robot_joint_accel_lineEdit.setText("1")
+        self.robot_joint_speed_lineEdit.setText("10")
+        self.robot_joint_accel_lineEdit.setText("10")
         self.position_reset_pushButton.setText("Reset robot position")
         self.set_scan_init_pushButton.setText("Set new scan origin point")
         self.set_robot_speed_pushButton.setText("Set robot speed")
@@ -647,6 +665,10 @@ class MainWindow(QtWidgets.QMainWindow):
         ManualControlWidget.group_minus.buttonReleased.connect(self.manual_button_released)
         ManualControlWidget.group_plus.buttonReleased.connect(self.manual_button_released)
 
+        self.coord_update_timer = QtCore.QTimer()
+        self.coord_update_timer.setInterval(1)
+        self.coord_update_timer.timeout.connect(self.coord_update_func)
+
         self.robot_controls_widget.position_reset_pushButton.clicked.connect(self.position_reset_button_clicked)
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
         self.robot_controls_widget.set_robot_speed_pushButton.clicked.connect(self.set_robot_speed)
@@ -656,6 +678,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_on_robot = False
         self.robot_start_widget.simulate_pushButton.clicked.connect(self.run_program_in_sim)
         self.robot_start_widget.run_pushButton.clicked.connect(self.run_program_on_robot)
+
+        self.movement_lock = threading.Lock()
     def minus_button_pressed(self):
         a = [x.radioButton.text() for x in self.coordinates_widgets_list]
         b = [x.radioButton.isChecked() for x in self.coordinates_widgets_list].index(True)
@@ -671,24 +695,49 @@ class MainWindow(QtWidgets.QMainWindow):
     def manual_button_released(self):
         self.move_timer.stop()
 
+    def movement_function_decorator(func):
+        @functools.wraps(func)
+        def _wrapper(*args, **kwargs):
+
+            print("moved")
+            lock = args[0].movement_lock
+            if lock.locked():
+                return None
+            else:
+                return func(*args, **kwargs)
+
+        return _wrapper
+
+    @synchronized
     def move_timer_func(self):
-        # print(self.manual_direction)
-        try:
-            dict = {"+X":(1,0,0),"+Y":(0,1,0),"+Z":(0,0,1),
-                    "-X":(-1,0,0),"-Y":(0,-1,0),"-Z":(0,0,-1),
-                    "+A": (0, 0, 0, 1, 0, 0), "+B": (0, 0, 0, 0, 1, 0), "+C": (0, 0, 0, 0, 0, 1),
-                    "-A": (0, 0, 0, -1, 0, 0), "-B": (0, 0, 0, 0, -1, 0), "-C": (0, 0, 0, 0, 0, -1)}
-            speed = float(self.robot_controls_widget.man_step_lineEdit.text())
-            self.current_robot_pose = self.robot_rdk.move_relative([x*speed for x in dict[self.manual_direction]])
-            self.update_current_robot_pose()
-        except ValueError:
-            print('Inputted value is invalid')
+        # with self.movement_lock:
+            # print(self.manual_direction)
+            try:
+                dict = {"+X":(1,0,0),"+Y":(0,1,0),"+Z":(0,0,1),
+                        "-X":(-1,0,0),"-Y":(0,-1,0),"-Z":(0,0,-1),
+                        "+A": (0, 0, 0, 1, 0, 0), "+B": (0, 0, 0, 0, 1, 0), "+C": (0, 0, 0, 0, 0, 1),
+                        "-A": (0, 0, 0, -1, 0, 0), "-B": (0, 0, 0, 0, -1, 0), "-C": (0, 0, 0, 0, 0, -1)}
+                speed = float(self.robot_controls_widget.man_step_lineEdit.text())
+                self.current_robot_pose = self.robot_rdk.move_relative([x*speed for x in dict[self.manual_direction]])
+                self.update_current_robot_pose()
+            except ValueError:
+                print('Inputted value is invalid')
+
+    def coord_update_func(self):
+        current_coords = robomath.Pose_2_KUKA(self.robot_rdk.robot.Pose())
+        i = 0
+        for r in self.feedback_widget.params_rows[:2]:
+            for w in r[1::2]:
+                w.setText(f"{current_coords[i]:.2f}")
+                i+=1
+
     def update_current_robot_pose(self):
         for i,w in enumerate(self.coordinates_widgets_list):
             w.pos_fdbk_label.setText(f"{self.current_robot_pose[i]:.0f}")
         for i, x in enumerate(self.current_robot_pose):
             self.feedback_widget.params_rows[i//3][(i%3)*2+1].setText(f"{x:.0f}")
 
+    @synchronized
     def position_reset_button_clicked(self):
         self.robot_rdk.move_to_initial()
 
@@ -704,53 +753,56 @@ class MainWindow(QtWidgets.QMainWindow):
         x.start()
         # self.scan_xyz()
 
+    @synchronized
     def scan_xyz(self):
-        try:
-            points_axes = []
-            shape = []
-            for param in self.scan_parameters_widget.params_rows[2:]:
-                min = float(param[1].text())
-                max = float(param[3].text())
-                steps = int(param[5].text())
-                shape.append(steps)
-                points_axes.append(np.linspace(min,max,steps))
-            dir_x = 1
-            dir_y = 1
-            dir_z = 1
-            data = np.empty(shape)
-            X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
-            data[:] = np.nan
-            for iz, z in enumerate(points_axes[2]):
-                for iy, y in enumerate(points_axes[1][::dir_y]):
-                    for ix, x in enumerate(points_axes[0][::dir_x]):
-                        print(x,y,z)
-                        self.robot_rdk.robot.setPoseFrame(self.robot_rdk.frame_scan_init)
-                        self.robot_rdk.move_target(self.robot_rdk.target_scan, (x,y,z))
-                        self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan.Pose())
-                        self.robot_rdk.robot.setPoseFrame(self.robot_rdk.robot.Parent())
-                        data_point = self.query_data(2)[0]
+            try:
+                points_axes = []
+                shape = []
+                for param in self.scan_parameters_widget.params_rows[2:]:
+                    min = float(param[1].text())
+                    max = float(param[3].text())
+                    steps = int(param[5].text())
+                    shape.append(steps)
+                    points_axes.append(np.linspace(min,max,steps))
+                dir_x = 1
+                dir_y = 1
+                dir_z = 1
+                data = np.empty(shape)
+                X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
+                data[:] = np.nan
+                for iz, z in enumerate(points_axes[2]):
+                    for iy, y in enumerate(points_axes[1][::dir_y]):
+                        for ix, x in enumerate(points_axes[0][::dir_x]):
+                            # print(x,y,z)
+                            # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.frame_scan_init)
+                            # self.robot_rdk.move_target(self.robot_rdk.target_scan, (x,y,z))
+                            # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init,x,y,z))
+                            new_pose = self.robot_rdk.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+                            self.robot_rdk.target_scan.setPose(new_pose)
+                            self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan.Pose())
 
+                            # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init.PoseWrt(self.robot_rdk.robot.Parent()),x,y,z))
+                            # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.robot.Parent())
+                            if self.vna_connected:
+                                data_point = self.query_data(2)[0]
+                                data[ix*dir_x-(1 if dir_x<0 else 0),
+                                     iy*dir_y-(1 if dir_y<0 else 0),
+                                     iz] = data_point
 
-                        data[ix*dir_x-(1 if dir_x<0 else 0),
-                             iy*dir_y-(1 if dir_y<0 else 0),
-                             iz] = data_point
-                        print(data)
+                                # print(data)
+                                self.scan_plot_w.ax_scan.clear()
+                                self.scan_plot_w.ax_scan.pcolor(Y_grid,X_grid,data[:, :, 0].T,shading='nearest')
+                                self.scan_plot_w.canvas.draw()
 
-                        self.scan_plot_w.ax_scan.clear()
-                        self.scan_plot_w.ax_scan.pcolor(Y_grid,X_grid,data[:, :, 0].T,shading='nearest')
-                        self.scan_plot_w.canvas.draw()
-                    dir_x *= -1
-                dir_y *= -1
-            print(data)
-
-            # self.scan_plot_w.ax_scan.clear()
-            # self.scan_plot_w.ax_scan.pcolor(data[:, :, 0])
-            # self.scan_plot_w.canvas.draw()
-
-
-
-        except ValueError:
-            print('Inputted value is invalid')
+                        dir_x *= -1
+                    dir_y *= -1
+                self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan_init.Pose())
+                print(data)
+                # self.scan_plot_w.ax_scan.clear()
+                # self.scan_plot_w.ax_scan.pcolor(data[:, :, 0])
+                # self.scan_plot_w.canvas.draw()
+            except ValueError:
+                print('Inputted value is invalid')
 
     def run_program_on_robot(self):
         self.run_on_robot = True
@@ -783,6 +835,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.robot_connected = True
                 self.connection_widget.con_robot_pushButton.setText("Disconnect robot")
                 self.connection_widget.con_robot_pushButton.setStyleSheet("background-color: red")
+                self.coord_update_timer.start()
+                self.statusbar.setStyleSheet("background-color: green")
+                self.set_robot_speed()
             finally:
                 pass
             # except RsInstrument.RsInstrException:
@@ -795,6 +850,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.robot_connected = False
             self.connection_widget.con_robot_pushButton.setText("Connect robot")
             self.connection_widget.con_robot_pushButton.setStyleSheet("background-color: light gray")
+            self.coord_update_timer.stop()
+            self.statusbar.setStyleSheet("background-color: light gray")
         for w in (self.manualCTab,self.scan_parameters_widget):
             w.setEnabled(self.robot_connected)
 
@@ -1148,11 +1205,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actionClose.setText("Close")
         self.actionAbout.setText("About")
 
+        # self.indicatorLed = QtWidgets.QLabel()
+        # self.statusbar.setAutoFillBackground(True)
+        # self.statusbar.setStyleSheet("border-radius: 20px; min-height: 40px; min-width: 40px, background-color: red")
+        self.statusbar.setStyleSheet("background-color: light gray")
+        # self.indicatorLed.setText("None")
+
         self.menuSettings.addAction(self.actionReset)
         self.menuSettings.addAction(self.actionClose)
         self.menuHelp.addAction(self.actionAbout)
         self.menubar.addAction(self.menuSettings.menuAction())
         self.menubar.addAction(self.menuHelp.menuAction())
+        # self.statusbar.addWidget(self.indicatorLed)
 
         MainWindow.setWindowTitle("Main Window")
         self.mainTabWidget.setCurrentIndex(0)
