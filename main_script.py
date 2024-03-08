@@ -11,6 +11,8 @@ import robodk.robomath as robomath
 import numpy as np
 import threading
 import functools
+import datetime
+import time
 
 def synchronized(f):
     @functools.wraps(f)
@@ -223,8 +225,8 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.man_step_lineEdit.setText("5")
         self.robot_joint_speed_label.setText("Joints speed")
         self.robot_joint_accel_label.setText("Joints acceleration")
-        self.robot_joint_speed_lineEdit.setText("10")
-        self.robot_joint_accel_lineEdit.setText("10")
+        self.robot_joint_speed_lineEdit.setText("5")
+        self.robot_joint_accel_lineEdit.setText("5")
         self.position_reset_pushButton.setText("Reset robot position")
         self.position_reset_cross_pushButton.setText("Reset robot position (cross)")
         self.set_scan_init_pushButton.setText("Set new scan origin point")
@@ -320,6 +322,7 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.sttl_label = QtWidgets.QLabel()
         self.sttl_label.setText("Settling time, s")
         self.sttl_lineEdit = QtWidgets.QLineEdit()
+        self.sttl_lineEdit.setText("0")
         self.sttl_label.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed,QtWidgets.QSizePolicy.Policy.Fixed)
         self.sttl_lineEdit.setMaximumWidth(50)
         sttl_layout = QtWidgets.QHBoxLayout()
@@ -752,8 +755,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def send_robot_to_initial(self, pol ="H"):
         if pol == "H":
             self.robot_rdk.robot.MoveJ(self.robot_rdk.target_init.Joints())
+            self.robot_rdk.target_rel.setPose(self.robot_rdk.target_init.Pose())
         elif pol == "V":
             self.robot_rdk.robot.MoveJ(self.robot_rdk.target_init_cross.Joints())
+            self.robot_rdk.target_rel.setPose(self.robot_rdk.target_init_cross.Pose())
         else:
             pass
 
@@ -799,8 +804,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
                             # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init.PoseWrt(self.robot_rdk.robot.Parent()),x,y,z))
                             # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.robot.Parent())
+
                             if self.vna_connected:
-                                data_point = self.query_data(2)[0]
+                                time.sleep(float(self.scan_parameters_widget.sttl_lineEdit.text()))
+                                #time.sleep(0)
+                                #data_point = self.query_data(1)[0]
+                                data_point = self.query_data(1)[601//2]
+
                                 data[ix*dir_x-(1 if dir_x<0 else 0),
                                      iy*dir_y-(1 if dir_y<0 else 0),
                                      iz] = data_point
@@ -814,6 +824,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     dir_y *= -1
                 self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan_init.Pose())
                 print(data)
+                current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
+
+                np.savetxt(f"{current_time}.txt", np.squeeze(data))
+                np.save(f"{current_time}.npy", data)
+                np.savetxt(f"{current_time}_coords_x.txt", np.array(points_axes[0]))
+                np.savetxt(f"{current_time}_coords_y.txt", np.array(points_axes[1]))
+                np.savetxt(f"{current_time}_coords_z.txt", np.array(points_axes[2]))
                 # self.scan_plot_w.ax_scan.clear()
                 # self.scan_plot_w.ax_scan.pcolor(data[:, :, 0])
                 # self.scan_plot_w.canvas.draw()
@@ -822,8 +839,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def run_program_on_robot(self):
         self.run_on_robot = True
+#        self.robot_rdk.RunMode()
         self.robot_rdk.run_on_robot(self.configs.robot_settings['ip'],
                                                  self.configs.robot_settings['port'])
+        self.set_robot_speed()
 
 
     def run_program_in_sim(self):
@@ -846,7 +865,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def robot_connect_button_clicked(self):
         if not self.robot_connected:
             try:
-                self.robot_rdk = RDK_KUKA(quit_on_close = True, joints=self.configs.robot_settings["joints"])
+                self.robot_rdk = RDK_KUKA(quit_on_close = True, joints=self.configs.robot_settings["joints2"])
                 self.append_log("Succesfully connected to RoboDK")
                 self.robot_connected = True
                 self.connection_widget.con_robot_pushButton.setText("Disconnect robot")
