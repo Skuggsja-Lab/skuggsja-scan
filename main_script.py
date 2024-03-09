@@ -58,20 +58,27 @@ class RobotMovementThread(QtCore.QThread):
         self.finished_movement.emit()
 
 class RobotMovementObject(QtCore.QObject):
-    finished_movement=QtCore.pyqtSignal()
+    finished_movement=QtCore.pyqtSignal(tuple,tuple)
     def __init__(self):
         super(RobotMovementObject, self).__init__()
         self.rdk_instance = RDK_KUKA(quit_on_close = True)
-    @QtCore.pyqtSlot()
-    def move_robot_to_point_scan(self):
+    @QtCore.pyqtSlot(tuple,tuple,tuple,float)
+    def move_robot_to_point_scan(self,coord_tuple=None, index_tuple=None,
+                                 dir_tuple=None, settle_time=0):
         # print(coord_tuple)
+        if coord_tuple != None:
+            # coord_tuple, index_tuple, dir_tuple, settle_time
+            x, y, z = coord_tuple
+            new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+            self.rdk_instance.target_scan.setPose(new_pose)
+            self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
+            print(coord_tuple)
+            time.sleep(settle_time)
+            self.finished_movement.emit(index_tuple, dir_tuple)
 
-        x, y, z = (100,100,0)
-        new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
-        self.rdk_instance.target_scan.setPose(new_pose)
-        self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
-        self.finished_movement.emit()
-
+    @QtCore.pyqtSlot()
+    def move_robot_to_init_scan(self):
+        self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan_init.Pose())
     @QtCore.pyqtSlot()
     def talk(self):
         print('yooooooo')
@@ -690,7 +697,8 @@ class ScanPlotWidget(PlotWidget):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    send_movement_coords = QtCore.pyqtSignal(tuple)
+    send_movement_coords = QtCore.pyqtSignal(tuple,tuple,tuple,float)
+    send_robot_to_scan_init = QtCore.pyqtSignal()
 
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
@@ -737,7 +745,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
         self.robot_controls_widget.set_robot_speed_pushButton.clicked.connect(self.set_robot_speed)
 
-        # self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
+        self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
 
         self.run_on_robot = False
         self.robot_start_widget.simulate_pushButton.clicked.connect(self.run_program_in_sim)
@@ -749,6 +757,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_plot_w.frequency_slider.sliderPressed.connect(lambda: self.freq_select_vline.set_visible(True))
         self.scan_plot_w.frequency_slider.sliderReleased.connect(lambda: self.freq_select_vline.set_visible(False))
         self.scan_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
+        self.scan_plot_w.plot_format_combobox.currentTextChanged.connect(self.scan_plot_update)
         self.scan_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed)
 
 
@@ -837,24 +846,15 @@ class MainWindow(QtWidgets.QMainWindow):
             w_list[i//3][(i%3)*2+1].setText(f"{x:.3f}")
 
     def begin_scan(self):
-        x = threading.Thread(target=self.test_scan)
+        # x = threading.Thread(target=self.test_scan)
         # x = QtCore.QThread
-        x.start()
-        # self.scan_xyz()
+        # x.start()
+        self.scan_xyz()
         # self.test_scan()
 
-    def test_scan(self):
-        scan_thread = RobotMovementThread(self.robot_rdk)
-        self.send_movement_coords.connect(scan_thread.move_robot_to_point_scan)
-        self.send_movement_coords.emit((100, 100, 0))
-        self.send_movement_coords.emit((-100, -100, 0))
 
     # @synchronized
     def scan_xyz(self):
-        can_plot = self.vna_connected
-        scan_thread = RobotMovementThread(self.robot_rdk)
-        scan_thread.run()
-        self.send_movement_coords.connect(scan_thread.move_robot_to_point_scan)
         try:
             points_axes = []
             shape = []
@@ -865,54 +865,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 shape.append(steps)
                 points_axes.append(np.linspace(min,max,steps))
             self.scan_coords = points_axes
+            if self.vna_connected:
+                shape.append(len(self.freq_arr))
             dir_x = 1
             dir_y = 1
             dir_z = 1
             self.data = np.empty(shape)
             X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
             self.data[:] = np.nan
+            self.update_coord_slider()
         # except ValueError:
         #     print('Inputted value is invalid')
         # try:
-            for iz, z in enumerate(points_axes[2]):
+            for iz, z in enumerate(points_axes[2][::dir_z]):
                 for iy, y in enumerate(points_axes[1][::dir_y]):
                     for ix, x in enumerate(points_axes[0][::dir_x]):
-                        # print(x,y,z)
-                        # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.frame_scan_init)
-                        # self.robot_rdk.move_target(self.robot_rdk.target_scan, (x,y,z))
-                        # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init,x,y,z))
-                        # RobotMovementThread.
-                        self.send_movement_coords.emit((x,y,z))
-
-
-                        # new_pose = self.robot_rdk.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
-                        # self.robot_rdk.target_scan.setPose(new_pose)
-                        # self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan.Pose())
-
-
-
-                    # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init.PoseWrt(self.robot_rdk.robot.Parent()),x,y,z))
-                    # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.robot.Parent())
-
-                        if can_plot:
-                            time.sleep(float(self.scan_parameters_widget.sttl_lineEdit.text()))
-                            #time.sleep(0)
-                            #data_point = self.query_data(1)[0]
-                            data_point = self.query_data(1)[601//2]
-
-                            self.data[ix*dir_x-(1 if dir_x<0 else 0),
-                                 iy*dir_y-(1 if dir_y<0 else 0),
-                                 iz] = data_point
-
-                            # print(data)
-                            # self.scan_plot_w.ax_scan.clear()
-                            # self.scan_plot_w.ax_scan.pcolor(Y_grid,X_grid,data[:, :, 0].T,shading='nearest')
-                            # self.scan_plot_w.canvas.draw()
-
+                        settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
+                        self.send_movement_coords.emit((x,y,z),(ix,iy,iz),(dir_x,dir_y,dir_z),settle_time)
                     dir_x *= -1
                 dir_y *= -1
-            self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan_init.Pose())
-            print(self.data)
+            self.send_robot_to_scan_init.emit()
+            # print(self.data)
             current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
 
 
@@ -927,6 +900,18 @@ class MainWindow(QtWidgets.QMainWindow):
             # self.scan_plot_w.canvas.draw()
         except ValueError:
             print('Inputted value is invalid')
+
+    @QtCore.pyqtSlot(tuple, tuple)
+    def scan_data_add_point(self, index_tuple, dir_tuple):
+        ix, iy, iz = index_tuple
+        dir_x, dir_y, dir_z = dir_tuple
+        if self.vna_connected:
+            data_point = self.query_data(1,raw=True)
+            self.data[ix * dir_x - (1 if dir_x < 0 else 0),
+                      iy * dir_y - (1 if dir_y < 0 else 0),
+            iz* dir_z - (1 if dir_z < 0 else 0),:] = data_point
+            self.scan_plot_update()
+
 
     def run_program_on_robot(self):
         self.run_on_robot = True
@@ -971,7 +956,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.worker.moveToThread(self.thread)
                 print(self.thread.currentThread())
                 self.send_movement_coords.connect(self.worker.move_robot_to_point_scan)
-                self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.test_emit)
+                self.send_robot_to_scan_init.connect(self.worker.move_robot_to_init_scan)
+                self.worker.finished_movement.connect(self.scan_data_add_point)
+                # self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.test_emit)
                 self.thread.start()
                 print(self.thread.currentThread())
                 # self.scan_parameters_widget.scan_start_pushButton.clicked.connect(
@@ -1177,10 +1164,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggle_var = not self.toggle_var
         self.button_text_update()
 
+
     def scan_plot_update(self):
-        X_grid, Y_grid = np.meshgrid(self.scan_coords[0], self.scan_coords[1])
-        self.scan_plot_w.ax_scan.clear()
-        self.scan_plot_w.ax_scan.pcolor(Y_grid, X_grid, self.data[:, :, self.scan_plot_w.coordinate_slider.value()].T, shading='nearest')
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data)
+        if self.scan_plot_w.slice_direction_combobox.currentText() == "XY":
+                X_grid, Y_grid = np.meshgrid(self.scan_coords[0], self.scan_coords[1])
+                self.scan_plot_w.ax_scan.clear()
+                self.scan_plot_w.ax_scan.pcolor(X_grid, Y_grid, formatted_data[:, :,
+                                                                self.scan_plot_w.coordinate_slider.value(),
+                                                                self.scan_plot_w.frequency_slider.value()].T, shading='nearest')
+        elif self.scan_plot_w.slice_direction_combobox.currentText() == "XZ":
+                X_grid, Z_grid = np.meshgrid(self.scan_coords[0], self.scan_coords[2])
+                self.scan_plot_w.ax_scan.clear()
+                self.scan_plot_w.ax_scan.pcolor(X_grid, Z_grid, formatted_data[:,self.scan_plot_w.coordinate_slider.value(), :,
+                                                                self.scan_plot_w.frequency_slider.value()].T, shading='nearest')
+        elif self.scan_plot_w.slice_direction_combobox.currentText() == "YZ":
+                Y_grid, Z_grid = np.meshgrid(self.scan_coords[1], self.scan_coords[2])
+                self.scan_plot_w.ax_scan.clear()
+                self.scan_plot_w.ax_scan.pcolor(Y_grid, Z_grid, formatted_data[self.scan_plot_w.coordinate_slider.value(),:, :,
+                                                                self.scan_plot_w.frequency_slider.value()].T, shading='nearest')
         self.scan_plot_w.canvas.draw()
 
     def set_slider(self, value, slider):
@@ -1198,7 +1200,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.freq_select_vline.set_xdata([self.new_frequency, self.new_frequency])
         # self.new_frequency_index = self.find_nearest_frequency_point(self.new_frequency)
         self.vna_plot_w.canvas.draw()
-        # self.scan_plot_update()
+        self.scan_plot_update()
 
     def find_nearest_frequency_point(self, value):
         return np.argmin(np.abs(self.freq_arr - value))
@@ -1214,7 +1216,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def update_coord_slider(self):
         self.scan_plot_w.coordinate_slider.setRange(0,
             len(self.scan_coords[self.scan_plot_w.slice_directions[self.scan_plot_w.slice_direction_combobox.currentText()]])-1)
-        self.scan_plot_update()
+        if self.vna_connected:
+            self.scan_plot_update()
 
     def initialize_connectionTab(self):
         connectionTab = QtWidgets.QWidget()
