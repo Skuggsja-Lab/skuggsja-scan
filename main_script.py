@@ -32,6 +32,50 @@ def synchronized(f):
             print("Another function is already controlling the robot")
     return new_function
 
+class RobotMovementThread(QtCore.QThread):
+    finished_movement=QtCore.pyqtSignal()
+    def __init__(self):
+        super(RobotMovementThread, self).__init__()
+        self.running = False
+        self.rdk_instance = RDK_KUKA(quit_on_close = True)
+    def run(self):
+        self.running = True
+        # i = 0
+        # while self.running:
+        #     i += 1
+            # self.beep.emit(i)
+            # time.sleep(self.sleep_time)
+    def stop(self):
+        self.running = False
+    def update_value(self,value):
+        self.sleep_time=value
+
+    def move_robot_to_point_scan(self,coord_tuple):
+        x, y, z = coord_tuple
+        new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+        self.rdk_instance.target_scan.setPose(new_pose)
+        self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
+        self.finished_movement.emit()
+
+class RobotMovementObject(QtCore.QObject):
+    finished_movement=QtCore.pyqtSignal()
+    def __init__(self):
+        super(RobotMovementObject, self).__init__()
+        self.rdk_instance = RDK_KUKA(quit_on_close = True)
+    @QtCore.pyqtSlot()
+    def move_robot_to_point_scan(self):
+        # print(coord_tuple)
+
+        x, y, z = (100,100,0)
+        new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+        self.rdk_instance.target_scan.setPose(new_pose)
+        self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
+        self.finished_movement.emit()
+
+    @QtCore.pyqtSlot()
+    def talk(self):
+        print('yooooooo')
+
 def msgtoarr(s):
     return np.fromstring(s, sep=',')
 class QLabelFramed(QtWidgets.QLabel):
@@ -646,6 +690,8 @@ class ScanPlotWidget(PlotWidget):
 
 
 class MainWindow(QtWidgets.QMainWindow):
+    send_movement_coords = QtCore.pyqtSignal(tuple)
+
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
         self.configs = Config("aaa.toml")
@@ -691,7 +737,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
         self.robot_controls_widget.set_robot_speed_pushButton.clicked.connect(self.set_robot_speed)
 
-        self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
+        # self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
 
         self.run_on_robot = False
         self.robot_start_widget.simulate_pushButton.clicked.connect(self.run_program_in_sim)
@@ -704,6 +750,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_plot_w.frequency_slider.sliderReleased.connect(lambda: self.freq_select_vline.set_visible(False))
         self.scan_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
         self.scan_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed)
+
+
+
+
     def minus_button_pressed(self):
         a = [x.radioButton.text() for x in self.coordinates_widgets_list]
         b = [x.radioButton.isChecked() for x in self.coordinates_widgets_list].index(True)
@@ -787,14 +837,24 @@ class MainWindow(QtWidgets.QMainWindow):
             w_list[i//3][(i%3)*2+1].setText(f"{x:.3f}")
 
     def begin_scan(self):
-        x = threading.Thread(target=self.scan_xyz)
-        x = QtCore.QThread
+        x = threading.Thread(target=self.test_scan)
+        # x = QtCore.QThread
         x.start()
         # self.scan_xyz()
+        # self.test_scan()
 
-    @synchronized
+    def test_scan(self):
+        scan_thread = RobotMovementThread(self.robot_rdk)
+        self.send_movement_coords.connect(scan_thread.move_robot_to_point_scan)
+        self.send_movement_coords.emit((100, 100, 0))
+        self.send_movement_coords.emit((-100, -100, 0))
+
+    # @synchronized
     def scan_xyz(self):
         can_plot = self.vna_connected
+        scan_thread = RobotMovementThread(self.robot_rdk)
+        scan_thread.run()
+        self.send_movement_coords.connect(scan_thread.move_robot_to_point_scan)
         try:
             points_axes = []
             shape = []
@@ -804,12 +864,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 steps = int(param[5].text())
                 shape.append(steps)
                 points_axes.append(np.linspace(min,max,steps))
+            self.scan_coords = points_axes
             dir_x = 1
             dir_y = 1
             dir_z = 1
-            data = np.empty(shape)
+            self.data = np.empty(shape)
             X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
-            data[:] = np.nan
+            self.data[:] = np.nan
+        # except ValueError:
+        #     print('Inputted value is invalid')
+        # try:
             for iz, z in enumerate(points_axes[2]):
                 for iy, y in enumerate(points_axes[1][::dir_y]):
                     for ix, x in enumerate(points_axes[0][::dir_x]):
@@ -817,9 +881,15 @@ class MainWindow(QtWidgets.QMainWindow):
                         # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.frame_scan_init)
                         # self.robot_rdk.move_target(self.robot_rdk.target_scan, (x,y,z))
                         # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init,x,y,z))
-                        new_pose = self.robot_rdk.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
-                        self.robot_rdk.target_scan.setPose(new_pose)
-                        self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan.Pose())
+                        # RobotMovementThread.
+                        self.send_movement_coords.emit((x,y,z))
+
+
+                        # new_pose = self.robot_rdk.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+                        # self.robot_rdk.target_scan.setPose(new_pose)
+                        # self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan.Pose())
+
+
 
                     # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init.PoseWrt(self.robot_rdk.robot.Parent()),x,y,z))
                     # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.robot.Parent())
@@ -830,19 +900,19 @@ class MainWindow(QtWidgets.QMainWindow):
                             #data_point = self.query_data(1)[0]
                             data_point = self.query_data(1)[601//2]
 
-                            data[ix*dir_x-(1 if dir_x<0 else 0),
+                            self.data[ix*dir_x-(1 if dir_x<0 else 0),
                                  iy*dir_y-(1 if dir_y<0 else 0),
                                  iz] = data_point
 
                             # print(data)
-                            self.scan_plot_w.ax_scan.clear()
-                            self.scan_plot_w.ax_scan.pcolor(Y_grid,X_grid,data[:, :, 0].T,shading='nearest')
-                            self.scan_plot_w.canvas.draw()
+                            # self.scan_plot_w.ax_scan.clear()
+                            # self.scan_plot_w.ax_scan.pcolor(Y_grid,X_grid,data[:, :, 0].T,shading='nearest')
+                            # self.scan_plot_w.canvas.draw()
 
                     dir_x *= -1
                 dir_y *= -1
             self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan_init.Pose())
-            print(data)
+            print(self.data)
             current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
 
 
@@ -894,6 +964,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.coord_update_timer.start()
                 self.statusbar.setStyleSheet("background-color: green")
                 self.set_robot_speed()
+
+                self.thread = QtCore.QThread()
+                print(self.thread.currentThread())
+                self.worker = RobotMovementObject()
+                self.worker.moveToThread(self.thread)
+                print(self.thread.currentThread())
+                self.send_movement_coords.connect(self.worker.move_robot_to_point_scan)
+                self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.test_emit)
+                self.thread.start()
+                print(self.thread.currentThread())
+                # self.scan_parameters_widget.scan_start_pushButton.clicked.connect(
+                #     lambda: self.worker.move_robot_to_point_scan((100, 100, 0)))
+
             finally:
                 pass
             # except RsInstrument.RsInstrException:
@@ -911,7 +994,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.manualCTab,self.scan_parameters_widget):
             w.setEnabled(self.robot_connected)
 
-
+    def test_emit(self):
+        print(self.thread.currentThread())
+        self.send_movement_coords.emit((100,100,0))
 
     def vna_connect_button_clicked(self):
         if not self.vna_connected:

@@ -8,21 +8,26 @@ import threading
 class RDK_KUKA(Robolink):
     def __init__(self, coordinates = None, joints = None, *args, **kargs):
         super(RDK_KUKA, self).__init__(*args, **kargs)
-        self.AddFile("KUKA-KR-6-R900-2.robot")
+
         self.robot = self.ItemUserPick('KUKA KR 6 R900 2', ITEM_TYPE_ROBOT)
-        self.robot.setSpeed(-1,20)  # Set linear speed in mm/s, joints speed in deg/s
-        if coordinates != None or joints != None:
-            if joints != None:
-                self.robot.setJoints(joints)
-            else:
-                self.robot.setPose(KUKA_2_Pose(coordinates))
-        self.Command("FitAll")
-        self.AddTarget('Target initial')
-        self.AddTarget('Target initial cross')
+        if not self.robot.Valid():
+            self.AddFile("KUKA-KR-6-R900-2.robot")
+            self.robot = self.ItemUserPick('KUKA KR 6 R900 2', ITEM_TYPE_ROBOT)
+            self.robot.setSpeed(-1,20)  # Set linear speed in mm/s, joints speed in deg/s
+            if coordinates != None or joints != None:
+                if joints != None:
+                    self.robot.setJoints(joints)
+                else:
+                    self.robot.setPose(KUKA_2_Pose(coordinates))
+            self.Command("FitAll")
+            self.AddTarget('Target initial')
+            self.AddTarget('Target initial cross')
+            self.AddTarget('Target manual')
+            self.AddTarget('Target scan initial',self.robot.Parent())
+            self.AddTarget('Target scan',self.robot.Parent())
+
         self.target_init = self.Item('Target initial')
         self.target_init_cross = self.Item('Target initial cross')
-        self.target_init_cross.setAsJointTarget()
-        self.target_init.setAsJointTarget()
         if coordinates != None or joints != None:
             if joints != None:
                 self.target_init.setJoints(joints)
@@ -31,23 +36,22 @@ class RDK_KUKA(Robolink):
         joints_cross = self.target_init.Joints()
         joints_cross[5,0] = joints_cross[5,0]+90
         self.target_init_cross.setJoints(joints_cross)
-        self.AddTarget('Target manual')
         self.target_rel = self.Item('Target manual')
 
+        self.target_init_cross.setAsJointTarget()
+        self.target_init.setAsJointTarget()
         # self.AddFrame('Frame scan initial',self.robot.Parent())
         # self.frame_scan_init = self.Item('Frame scan initial')
         # self.frame_scan_init.setPose(self.target_init.Pose())
         # self.robot.setPoseFrame(self.robot.Parent())
         # self.robot.setPoseTool(self.robot.PoseTool())
 
-        self.AddTarget('Target scan initial',self.robot.Parent())
         self.target_scan_init = self.Item('Target scan initial')
         # self.target_scan_init.setPose(self.frame_scan_init.Pose())
-        self.AddTarget('Target scan',self.robot.Parent())
         self.target_scan = self.Item('Target scan')
         # self.target_scan.setPose(self.frame_scan_init.Pose())
 
-        self.robot.MoveJ(self.target_init)
+        # self.robot.MoveJ(self.target_init)
 
 
     def move_target(self, target, coordinate_tuple):
