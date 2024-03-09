@@ -14,6 +14,8 @@ import functools
 import datetime
 import time
 
+save_on_scan_end = False
+
 def synchronized(f):
     @functools.wraps(f)
     def new_function(self, *args, **kw):
@@ -565,6 +567,10 @@ class PlotWidget(QtWidgets.QWidget):
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.VLayout.addWidget(self.toolbar)
         self.VLayout.addWidget(self.canvas)
+        self.plot_formats = {"Magnitude": abs, "Phase": np.angle, "Mag dB": lambda x: 20 * np.log10(np.abs(x)),
+                             "Real": np.real, "Imaginary": np.imag}
+        self.plot_format_units = {"Magnitude": "mW", "Phase": "degrees", "Mag dB": "dBm",
+                                  "Real": "mW", "Imaginary": "mW"}
 
 class VNAPlotWidget(PlotWidget):
     def __init__(self, parent=None):
@@ -591,7 +597,8 @@ class ScanPlotWidget(PlotWidget):
         self.gridLayout = QtWidgets.QGridLayout()
 
         self.gridLayout = QtWidgets.QGridLayout()
-        self.combobox_plot_format = QtWidgets.QComboBox()
+        self.plot_format_combobox = QtWidgets.QComboBox()
+        self.slice_direction_combobox = QtWidgets.QComboBox()
         self.checkbox_scatter = QtWidgets.QRadioButton()
         self.coordinate_label = QtWidgets.QLabel()
         self.coordinate_textfield = QtWidgets.QLineEdit()
@@ -605,15 +612,19 @@ class ScanPlotWidget(PlotWidget):
         self.checkbox_scatter.setText("Plot Format: line/scatter")
         self.coordinate_label.setText("Change coordinate to (mm):")
         self.frequency_label.setText("Change frequency to (GHz):")
+        self.plot_format_combobox.addItems(self.plot_formats.keys())
+        self.slice_directions = {"XY": 2, "XZ": 1, "YZ": 0}
+        self.slice_direction_combobox.addItems(self.slice_directions.keys())
 
-        self.gridLayout.addWidget(self.combobox_plot_format, 1, 0, 1, 2)
+        self.gridLayout.addWidget(self.plot_format_combobox, 1, 0, 1, 2)
         self.gridLayout.addWidget(self.checkbox_scatter, 1, 2, 1, 1)
-        self.gridLayout.addWidget(self.coordinate_label, 3, 0, 1, 1)
-        self.gridLayout.addWidget(self.coordinate_textfield, 3, 1, 1, 1)
-        self.gridLayout.addWidget(self.coordinate_slider, 3, 2, 1, 1)
-        self.gridLayout.addWidget(self.frequency_label, 2, 0, 1, 1)
-        self.gridLayout.addWidget(self.frequency_textfield, 2, 1, 1, 1)
-        self.gridLayout.addWidget(self.frequency_slider, 2, 2, 1, 1)
+        self.gridLayout.addWidget(self.slice_direction_combobox, 2, 0, 1, 2)
+        self.gridLayout.addWidget(self.coordinate_label, 4, 0, 1, 1)
+        self.gridLayout.addWidget(self.coordinate_textfield, 4, 1, 1, 1)
+        self.gridLayout.addWidget(self.coordinate_slider, 4, 2, 1, 1)
+        self.gridLayout.addWidget(self.frequency_label, 3, 0, 1, 1)
+        self.gridLayout.addWidget(self.frequency_textfield, 3, 1, 1, 1)
+        self.gridLayout.addWidget(self.frequency_slider, 3, 2, 1, 1)
 
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.button_save_current_points = QtWidgets.QPushButton()
@@ -644,7 +655,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.vna_plot_w.setEnabled(False)
 
         self.robot_connected = False
-        for w in (self.manualCTab,self.scan_parameters_widget):
+        for w in (self.manualCTab,self.scan_parameters_widget, self.scan_plot_w):
             w.setEnabled(False)
 
         self.connection_widget.vna_ip_lineEdit.setText(self.configs.VNA_settings["ip"])
@@ -687,6 +698,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_start_widget.run_pushButton.clicked.connect(self.run_program_on_robot)
 
         self.movement_lock = threading.Lock()
+
+        self.scan_plot_w.frequency_slider.valueChanged.connect(self.frequency_slider_changed)
+        self.scan_plot_w.frequency_slider.sliderPressed.connect(lambda: self.freq_select_vline.set_visible(True))
+        self.scan_plot_w.frequency_slider.sliderReleased.connect(lambda: self.freq_select_vline.set_visible(False))
+        self.scan_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
+        self.scan_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed)
     def minus_button_pressed(self):
         a = [x.radioButton.text() for x in self.coordinates_widgets_list]
         b = [x.radioButton.isChecked() for x in self.coordinates_widgets_list].index(True)
@@ -771,71 +788,75 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def begin_scan(self):
         x = threading.Thread(target=self.scan_xyz)
+        x = QtCore.QThread
         x.start()
         # self.scan_xyz()
 
     @synchronized
     def scan_xyz(self):
-            try:
-                points_axes = []
-                shape = []
-                for param in self.scan_parameters_widget.params_rows[2:]:
-                    min = float(param[1].text())
-                    max = float(param[3].text())
-                    steps = int(param[5].text())
-                    shape.append(steps)
-                    points_axes.append(np.linspace(min,max,steps))
-                dir_x = 1
-                dir_y = 1
-                dir_z = 1
-                data = np.empty(shape)
-                X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
-                data[:] = np.nan
-                for iz, z in enumerate(points_axes[2]):
-                    for iy, y in enumerate(points_axes[1][::dir_y]):
-                        for ix, x in enumerate(points_axes[0][::dir_x]):
-                            # print(x,y,z)
-                            # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.frame_scan_init)
-                            # self.robot_rdk.move_target(self.robot_rdk.target_scan, (x,y,z))
-                            # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init,x,y,z))
-                            new_pose = self.robot_rdk.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
-                            self.robot_rdk.target_scan.setPose(new_pose)
-                            self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan.Pose())
+        can_plot = self.vna_connected
+        try:
+            points_axes = []
+            shape = []
+            for param in self.scan_parameters_widget.params_rows[2:]:
+                min = float(param[1].text())
+                max = float(param[3].text())
+                steps = int(param[5].text())
+                shape.append(steps)
+                points_axes.append(np.linspace(min,max,steps))
+            dir_x = 1
+            dir_y = 1
+            dir_z = 1
+            data = np.empty(shape)
+            X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
+            data[:] = np.nan
+            for iz, z in enumerate(points_axes[2]):
+                for iy, y in enumerate(points_axes[1][::dir_y]):
+                    for ix, x in enumerate(points_axes[0][::dir_x]):
+                        # print(x,y,z)
+                        # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.frame_scan_init)
+                        # self.robot_rdk.move_target(self.robot_rdk.target_scan, (x,y,z))
+                        # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init,x,y,z))
+                        new_pose = self.robot_rdk.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+                        self.robot_rdk.target_scan.setPose(new_pose)
+                        self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan.Pose())
 
-                            # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init.PoseWrt(self.robot_rdk.robot.Parent()),x,y,z))
-                            # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.robot.Parent())
+                    # self.robot_rdk.target_scan.setPose(robomath.Offset(self.robot_rdk.frame_scan_init.PoseWrt(self.robot_rdk.robot.Parent()),x,y,z))
+                    # self.robot_rdk.robot.setPoseFrame(self.robot_rdk.robot.Parent())
 
-                            if self.vna_connected:
-                                time.sleep(float(self.scan_parameters_widget.sttl_lineEdit.text()))
-                                #time.sleep(0)
-                                #data_point = self.query_data(1)[0]
-                                data_point = self.query_data(1)[601//2]
+                        if can_plot:
+                            time.sleep(float(self.scan_parameters_widget.sttl_lineEdit.text()))
+                            #time.sleep(0)
+                            #data_point = self.query_data(1)[0]
+                            data_point = self.query_data(1)[601//2]
 
-                                data[ix*dir_x-(1 if dir_x<0 else 0),
-                                     iy*dir_y-(1 if dir_y<0 else 0),
-                                     iz] = data_point
+                            data[ix*dir_x-(1 if dir_x<0 else 0),
+                                 iy*dir_y-(1 if dir_y<0 else 0),
+                                 iz] = data_point
 
-                                # print(data)
-                                self.scan_plot_w.ax_scan.clear()
-                                self.scan_plot_w.ax_scan.pcolor(Y_grid,X_grid,data[:, :, 0].T,shading='nearest')
-                                self.scan_plot_w.canvas.draw()
+                            # print(data)
+                            self.scan_plot_w.ax_scan.clear()
+                            self.scan_plot_w.ax_scan.pcolor(Y_grid,X_grid,data[:, :, 0].T,shading='nearest')
+                            self.scan_plot_w.canvas.draw()
 
-                        dir_x *= -1
-                    dir_y *= -1
-                self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan_init.Pose())
-                print(data)
-                current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
+                    dir_x *= -1
+                dir_y *= -1
+            self.robot_rdk.robot.MoveJ(self.robot_rdk.target_scan_init.Pose())
+            print(data)
+            current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
 
-                np.savetxt(f"{current_time}.txt", np.squeeze(data))
-                np.save(f"{current_time}.npy", data)
-                np.savetxt(f"{current_time}_coords_x.txt", np.array(points_axes[0]))
-                np.savetxt(f"{current_time}_coords_y.txt", np.array(points_axes[1]))
-                np.savetxt(f"{current_time}_coords_z.txt", np.array(points_axes[2]))
-                # self.scan_plot_w.ax_scan.clear()
-                # self.scan_plot_w.ax_scan.pcolor(data[:, :, 0])
-                # self.scan_plot_w.canvas.draw()
-            except ValueError:
-                print('Inputted value is invalid')
+
+            if save_on_scan_end == True:
+                np.savetxt(f"{current_time}.txt", np.squeeze(self.data))
+                np.save(f"{current_time}.npy", self.data)
+                np.savetxt(f"{current_time}_coords_x.txt", np.array(scan_points[0]))
+                np.savetxt(f"{current_time}_coords_y.txt", np.array(scan_points[1]))
+                np.savetxt(f"{current_time}_coords_z.txt", np.array(scan_points[2]))
+            # self.scan_plot_w.ax_scan.clear()
+            # self.scan_plot_w.ax_scan.pcolor(data[:, :, 0])
+            # self.scan_plot_w.canvas.draw()
+        except ValueError:
+            print('Inputted value is invalid')
 
     def run_program_on_robot(self):
         self.run_on_robot = True
@@ -901,8 +922,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.vna_connected = True
                 self.connection_widget.con_vna_pushButton.setText("Disconnect VNA")
                 self.connection_widget.con_vna_pushButton.setStyleSheet("background-color: red")
-                self.plot_initialize()
                 self.update_VNA_settings()
+                self.plot_initialize()
             except RsInstrument.RsInstrException:
                 print("no")
                 self.append_log("Connection Failed")
@@ -915,6 +936,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.connection_widget.con_vna_pushButton.setStyleSheet("background-color: light gray")
         self.vna_parameters_widget.setEnabled(self.vna_connected)
         self.vna_plot_w.setEnabled(self.vna_connected)
+        self.scan_plot_w.setEnabled(self.vna_connected)
         if self.toggle_var:
             self.toggle()
 
@@ -946,7 +968,6 @@ class MainWindow(QtWidgets.QMainWindow):
         list_of_traces = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')
         self.configs.traces_to_show = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')[::2]
         self.traces = []
-        self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
         for tr_n in self.configs.traces_to_show:
             self.traces.append(self.ax.plot(self.freq_arr, self.query_data(tr_n), label=f"trace {tr_n}")[0])
         self.ax.legend()
@@ -955,7 +976,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.vna_plot_w.traces_to_show.clear()       # delete all items from comboBox
         self.vna_plot_w.traces_to_show.addItems(list_of_traces[1::2])
 
-        # self.freq_select_vline = self.ax.axvline(self.textfield_frequency_slider.value() / 10)
+        self.freq_select_vline = self.ax.axvline(self.freq_arr[self.scan_plot_w.frequency_slider.value()],
+                                                 visible = 1, color = "k")
 
         # refresh canvas
         self.vna_plot_w.canvas.draw()
@@ -1016,7 +1038,7 @@ class MainWindow(QtWidgets.QMainWindow):
             print('Inputted value is invalid')
 
     def update_VNA_settings(self):
-        """Queries the VNA for the current settings an updates the text in the widget.
+        """Queries the VNA for the current settings and updates the text in the widget.
         Also saves the current settings to the latest_settings.toml file."""
         self.configs.VNA_settings["bandwidth"] = self.instr.query_float('SENSe:BAND?')
         self.configs.VNA_settings["point_number"] = self.instr.query_int('SWEep:POINts?')
@@ -1043,6 +1065,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.vna_parameters_widget.avg_num_lineEdit.setText(str(self.configs.VNA_settings["averaged_samples"]))
         self.configs.save_toml("latest_settings.toml")
 
+        self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
+        self.scan_plot_w.frequency_slider.setRange(0,self.configs.VNA_settings["point_number"]-1)
+
     def button_text_update(self):
         if self.toggle_var:
             self.vna_plot_w.button_update_continuous.setText("Plot (push to stop)")
@@ -1067,6 +1092,44 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggle_var = not self.toggle_var
         self.button_text_update()
 
+    def scan_plot_update(self):
+        X_grid, Y_grid = np.meshgrid(self.scan_coords[0], self.scan_coords[1])
+        self.scan_plot_w.ax_scan.clear()
+        self.scan_plot_w.ax_scan.pcolor(Y_grid, X_grid, self.data[:, :, self.scan_plot_w.coordinate_slider.value()].T, shading='nearest')
+        self.scan_plot_w.canvas.draw()
+
+    def set_slider(self, value, slider):
+        try:
+            if value < slider.minimum() or value > slider.maximum():
+                print(f"Value out of bounds, snapped to {'minimum' if value < slider.minimum() else 'maximum'}")
+            slider.setValue(value)
+        except ValueError:
+            print('Inputted value is not a floating point number')
+
+    def frequency_slider_changed(self):
+        # print(self.textfield_frequency_slider.value())
+        self.new_frequency = self.freq_arr[self.scan_plot_w.frequency_slider.value()]
+        self.scan_plot_w.frequency_textfield.setText(f"{self.new_frequency:.2f}")
+        self.freq_select_vline.set_xdata([self.new_frequency, self.new_frequency])
+        # self.new_frequency_index = self.find_nearest_frequency_point(self.new_frequency)
+        self.vna_plot_w.canvas.draw()
+        # self.scan_plot_update()
+
+    def find_nearest_frequency_point(self, value):
+        return np.argmin(np.abs(self.freq_arr - value))
+
+    def coordinate_slider_changed(self):
+        # print(self.textfield_frequency_slider.value())
+        coord_arr = self.scan_coords[self.scan_plot_w.slice_directions[self.scan_plot_w.slice_direction_combobox.currentText()]]
+        self.new_coordinate = coord_arr[self.scan_plot_w.coordinate_slider.value()]
+        self.scan_plot_w.coordinate_textfield.setText(str(self.new_coordinate))
+        # self.coord_select_vline.set_xdata([self.new_coordinate, self.new_coordinate])
+        self.scan_plot_update()
+
+    def update_coord_slider(self):
+        self.scan_plot_w.coordinate_slider.setRange(0,
+            len(self.scan_coords[self.scan_plot_w.slice_directions[self.scan_plot_w.slice_direction_combobox.currentText()]])-1)
+        self.scan_plot_update()
 
     def initialize_connectionTab(self):
         connectionTab = QtWidgets.QWidget()
