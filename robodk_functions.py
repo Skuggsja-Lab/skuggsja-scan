@@ -12,7 +12,10 @@ class RDK_KUKA(Robolink):
         self.robot = self.ItemUserPick('KUKA KR 6 R900 2', ITEM_TYPE_ROBOT)
         if not self.robot.Valid():
             self.AddFile("KUKA-KR-6-R900-2.robot")
+            self.AddFile("w_band_mount.tool")
             self.robot = self.ItemUserPick('KUKA KR 6 R900 2', ITEM_TYPE_ROBOT)
+            self.robot.setPoseTool(self.robot.PoseTool()*rotz(pi))
+            self.robot.setVisible(1, VISIBLE_ROBOT_DEFAULT and not VISIBLE_ROBOT_FLANGE)
             self.robot.setSpeed(-1,20)  # Set linear speed in mm/s, joints speed in deg/s
             if coordinates != None or joints != None:
                 if joints != None:
@@ -26,6 +29,8 @@ class RDK_KUKA(Robolink):
             self.AddTarget('Target scan initial',self.robot.Parent())
             self.AddTarget('Target scan',self.robot.Parent())
 
+        self.tool = self.ItemUserPick("w_band_mount", ITEM_TYPE_TOOL)
+        self.setCollisionActivePair(COLLISION_OFF, self.tool, self.robot.ObjectLink(6))
         self.target_init = self.Item('Target initial')
         self.target_init_cross = self.Item('Target initial cross')
         if coordinates != None or joints != None:
