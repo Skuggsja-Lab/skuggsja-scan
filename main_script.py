@@ -98,11 +98,11 @@ def movement_wrapper_robot_internal(f, ):
     return new_function
 
 
-
 class RobotMovementObject(QtCore.QObject):
     arrived_at_point = QtCore.pyqtSignal(tuple,tuple)
     began_movement = QtCore.pyqtSignal()
     finished_movement = QtCore.pyqtSignal()
+    finished_scan = QtCore.pyqtSignal()
     ready_for_acquisition = QtCore.pyqtSignal()
     def __init__(self):
         super(RobotMovementObject, self).__init__()
@@ -116,12 +116,14 @@ class RobotMovementObject(QtCore.QObject):
         self.can_move = True
         self.monitor.kill_signal.connect(self.killswitch_recieved)
         self.monitor.kill_signal.connect(self.monitor_thread.quit)
+        self.settle_time = 0
+        self.acquisition_time = 0
 
 
-    @QtCore.pyqtSlot(tuple,tuple,tuple,float)
+    @QtCore.pyqtSlot(tuple,tuple,tuple)
     @movement_wrapper_robot_internal
     def move_robot_to_point_scan(self,coord_tuple=None, index_tuple=None,
-                                 dir_tuple=None, settle_time=0):
+                                 dir_tuple=None):
         if coord_tuple != None:
             self.began_movement.emit()
             # coord_tuple, index_tuple, dir_tuple, settle_time
@@ -133,9 +135,10 @@ class RobotMovementObject(QtCore.QObject):
             else:
                 print("Target coordinates are inaccessible")
             # print(coord_tuple)
-            time.sleep(settle_time)
+            time.sleep(self.settle_time)
+            self.ready_for_acquisition.emit()
+            time.sleep(self.acquisition_time)
             self.arrived_at_point.emit(index_tuple, dir_tuple)
-            # time.sleep(acquisition_time)
             self.finished_movement.emit()
 
     @QtCore.pyqtSlot(tuple)
@@ -164,6 +167,7 @@ class RobotMovementObject(QtCore.QObject):
         self.began_movement.emit()
         self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan_init.Pose())
         self.finished_movement.emit()
+        self.finished_scan.emit()
 
     @QtCore.pyqtSlot()
     @movement_wrapper_robot_internal
@@ -187,6 +191,13 @@ class RobotMovementObject(QtCore.QObject):
             self.monitor.robot_in_box=True
             self.monitor_thread.start()
 
+    @QtCore.pyqtSlot(float)
+    def set_settle_time(self,time):
+        self.settle_time = time
+
+    @QtCore.pyqtSlot(float)
+    def set_acquisition_time(self,time):
+        self.acquisition_time = time
 
     @QtCore.pyqtSlot()
     def talk(self):
@@ -765,14 +776,21 @@ class VNAPlotWidget(PlotWidget):
         self.gridLayout = QtWidgets.QGridLayout()
         self.button_update_continuous = QtWidgets.QPushButton()
         self.button_step = QtWidgets.QPushButton()
-        self.traces_to_show = QtWidgets.QComboBox()
+        self.traces_toolbutton = QtWidgets.QToolButton(self)
+        self.traces_toolmenu = QtWidgets.QMenu(self)
 
+        self.traces_toolbutton.setText('Traces to show')
         self.button_update_continuous.setText("Plot")
         self.button_step.setText("Step")
+        self.traces_toolbutton.setMenu(self.traces_toolmenu)
+        self.traces_toolbutton.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        size_policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,QtWidgets.QSizePolicy.Policy.Fixed)
+        self.traces_toolbutton.setSizePolicy(size_policy)
+        # self.traces_toolbutton.setMaximumWidth(50)
 
         self.gridLayout.addWidget(self.button_update_continuous, 3, 0, 1, 1)
         self.gridLayout.addWidget(self.button_step, 3, 1, 1, 1)
-        self.gridLayout.addWidget(self.traces_to_show, 1, 0, 1, 2)
+        self.gridLayout.addWidget(self.traces_toolbutton, 1, 0, 1, 2)
         self.gridLayout.addWidget(self.canvas, 0, 0, 1, 2)
 
         self.VLayout.addLayout(self.gridLayout)
@@ -816,7 +834,7 @@ class ScanPlotWidget(PlotWidget):
         self.button_save_current_points = QtWidgets.QPushButton()
         self.button_save_all_points_at_frequency = QtWidgets.QPushButton()
         self.button_save_all_points = QtWidgets.QPushButton()
-
+        #TODO: saving files as dataframes
         self.button_save_current_points.setText("Save current slice as .txt")
         self.button_save_all_points_at_frequency.setText("Save all points at current frequency as .nb")
         self.button_save_all_points.setText("Save all points as .nb")
@@ -832,12 +850,14 @@ class ScanPlotWidget(PlotWidget):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    send_movement_coords_scan = QtCore.pyqtSignal(tuple,tuple,tuple,float)
+    send_movement_coords_scan = QtCore.pyqtSignal(tuple,tuple,tuple)
     send_movement_coords_rel = QtCore.pyqtSignal(tuple)
     send_movement_coords_abs = QtCore.pyqtSignal(tuple)
     send_robot_to_scan_init = QtCore.pyqtSignal()
     send_robot_to_init = QtCore.pyqtSignal()
-
+    send_settle_time = QtCore.pyqtSignal(float)
+    send_acquisition_time = QtCore.pyqtSignal(float)
+    #TODO: 1D slice tab
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
         self.configs = Config("aaa.toml")
@@ -903,7 +923,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
         self.scan_plot_w.plot_format_combobox.currentTextChanged.connect(self.scan_plot_update)
         self.scan_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed)
-
 
 
     def minus_button_pressed(self):
@@ -1011,6 +1030,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.delta=[]
             if self.vna_connected:
                 shape.append(len(self.freq_arr))
+                self.instr.write_bool("INITiate:CONTinuous:ALL",False)
             dir_x = 1
             dir_y = 1
             dir_z = 1
@@ -1025,25 +1045,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 for iy, y in enumerate(points_axes[1][::dir_y]):
                     for ix, x in enumerate(points_axes[0][::dir_x]):
                         settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
+                        self.send_settle_time.emit(settle_time)
                         if self.vna_connected:
-                            settle_time +=  float(self.scan_parameters_widget.acq_labelFramed.text())
-                        self.send_movement_coords_scan.emit((x,y,z),(ix,iy,iz),(dir_x,dir_y,dir_z),settle_time)
+                            acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
+                            self.send_acquisition_time.emit(acq_time)
+                        self.send_movement_coords_scan.emit((x,y,z),(ix,iy,iz),(dir_x,dir_y,dir_z))
                     dir_x *= -1
                 dir_y *= -1
             self.send_robot_to_scan_init.emit()
             # print(self.data)
-            current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
-
-
-            if save_on_scan_end == True:
-                # np.savetxt(f"{current_time}.txt", np.squeeze(self.data))
-                np.save(f"{current_time}.npy", self.data)
-                np.savetxt(f"{current_time}_coords_x.txt", np.array(scan_points[0]))
-                np.savetxt(f"{current_time}_coords_y.txt", np.array(scan_points[1]))
-                np.savetxt(f"{current_time}_coords_z.txt", np.array(scan_points[2]))
-            # self.scan_plot_w.ax_scan.clear()
-            # self.scan_plot_w.ax_scan.pcolor(data[:, :, 0])
-            # self.scan_plot_w.canvas.draw()
         except ValueError:
             print('Inputted value is invalid')
 
@@ -1052,6 +1062,8 @@ class MainWindow(QtWidgets.QMainWindow):
         ix, iy, iz = index_tuple
         dir_x, dir_y, dir_z = dir_tuple
         if self.vna_connected:
+            if not self.instr.query_bool("*OPC?"):
+                print("WARNING: data has been read before a sweep finished")
             data_point = self.query_data(1,raw=True)
             self.data[ix * dir_x - (1 if dir_x < 0 else 0),
             iy * dir_y - (1 if dir_y < 0 else 0),
@@ -1077,6 +1089,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_parameters_widget.message_label.setText(message)
         self.previous_time = current_time
 
+    @QtCore.pyqtSlot()
+    def robot_scan_finished(self):
+        self.statusbar.setStyleSheet("background-color: green")
+        self.robot_busy = False
+        current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
+
+        if self.vna_connected:
+            self.instr.write_bool("INITiate:CONTinuous:ALL", True)
+
+        if save_on_scan_end:
+            np.save(f"{current_time}.npy", self.data)
+            np.savetxt(f"{current_time}_coords_x.txt", np.array(scan_points[0]))
+            np.savetxt(f"{current_time}_coords_y.txt", np.array(scan_points[1]))
+            np.savetxt(f"{current_time}_coords_z.txt", np.array(scan_points[2]))
+
+
+    @QtCore.pyqtSlot()
+    def trigger_VNA(self):
+        if self.vna_connected:
+            self.instr.write("INITiate:IMMediate:ALL")
 
 
 
@@ -1155,9 +1187,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.arrived_at_point.connect(self.scan_data_add_point)
         self.worker.began_movement.connect(self.robot_movement_started)
         self.worker.finished_movement.connect(self.robot_movement_finished)
+        self.worker.ready_for_acquisition.connect(self.trigger_VNA)
+        self.worker.finished_scan.connect(self.robot_scan_finished)
         self.worker.monitor.kill_signal.connect(self.process_boundary_hit)
         # self.worker.monitor.kill_signal.connect(self.worker_thread.quit)
-
+        self.send_settle_time.connect(self.worker.set_settle_time)
+        self.send_acquisition_time.connect(self.worker.set_acquisition_time)
         self.send_robot_to_init.connect(self.worker.restart_after_killswitch)
         self.worker.monitor.restart_signal.connect(self.restart_after_hit)
 
@@ -1165,6 +1200,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.pyqtSlot()
     def robot_movement_started(self):
         self.statusbar.setStyleSheet("background-color: red")
+        # print(self.instr.query_bool("*OPC?"))
         self.robot_busy = True
     @QtCore.pyqtSlot()
     def robot_movement_finished(self):
@@ -1235,7 +1271,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if raw:
             data = data[::2] + 1j * data[1::2]
         return data
-    def plot_initialize(self):
+    def plot_initialize(self, reset_trace_list = True):
 
         self.vna_plot_w.figure.clear()
 
@@ -1243,15 +1279,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax.set_xlabel('Frequency, GHz')
         self.ax.set_ylabel('S-parameters, dB')
         list_of_traces = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')
-        self.configs.traces_to_show = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')[::2]
+        list_of_trace_names = self.instr.query_str_stripped("CALCulate:PARameter:CATalog?").split(',')
+        self.dict_of_trace_nums = dict(zip(list_of_traces[1::2],list_of_traces[::2]))
+        self.dict_of_trace_meas = dict(zip(list_of_trace_names[::2], list_of_trace_names[1::2]))
+        if reset_trace_list:
+            self.configs.traces_to_show = list(self.dict_of_trace_nums.keys())
+        # print(self.configs.traces_to_show)
         self.traces = []
-        for tr_n in self.configs.traces_to_show:
-            self.traces.append(self.ax.plot(self.freq_arr, self.query_data(tr_n), label=f"trace {tr_n}")[0])
+        for trace in self.configs.traces_to_show:
+            self.traces.append(self.ax.plot(self.freq_arr, self.query_data(self.dict_of_trace_nums[trace]), label=f"{self.dict_of_trace_meas[trace]}")[0])
         self.ax.legend()
         self.vna_plot_w.figure.tight_layout()
 
-        self.vna_plot_w.traces_to_show.clear()       # delete all items from comboBox
-        self.vna_plot_w.traces_to_show.addItems(list_of_traces[1::2])
+        if reset_trace_list:
+            self.vna_plot_w.traces_toolmenu.clear()       # delete all items from comboBox
+            for trace in list(self.dict_of_trace_meas):
+                action = self.vna_plot_w.traces_toolmenu.addAction(trace+": "+self.dict_of_trace_meas[trace])
+                action.setCheckable(True)
+                action.setChecked(True)
+                action.toggled.connect(self.change_traces_shown)
 
         self.freq_select_vline = self.ax.axvline(self.freq_arr[self.scan_plot_w.frequency_slider.value()],
                                                  visible = 1, color = "k")
@@ -1262,8 +1308,18 @@ class MainWindow(QtWidgets.QMainWindow):
     def plot_update(self):
         """Update the data trace shown on the plot with the one currently on the VNA screen"""
         for i, trace in enumerate(self.traces):
-            trace.set_ydata(self.query_data(self.configs.traces_to_show[i]))
+            trace.set_ydata(self.query_data(self.dict_of_trace_nums[self.configs.traces_to_show[i]]))
+
         self.vna_plot_w.canvas.draw()
+
+    def change_traces_shown(self):
+        self.configs.traces_to_show = []
+        print("aaaa")
+        for action in self.vna_plot_w.traces_toolmenu.actions():
+            if action.isChecked():
+                print(action)
+                self.configs.traces_to_show.append(action.text().split(":")[0])
+        self.plot_initialize(reset_trace_list=False)
 
     def set_VNA_settings(self):
         try:
@@ -1309,8 +1365,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.instr.write(f'AVERage:COUNt {int(new_averaged_samples)}')
             self.update_VNA_settings()
             self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
-            self.plot_initialize()
-            self.plot_initialize()
+            self.plot_initialize(reset_trace_list = False)
+            self.plot_initialize(reset_trace_list = False)
         except ValueError:
             print('Inputted value is invalid')
 
