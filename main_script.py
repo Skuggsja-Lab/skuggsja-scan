@@ -16,9 +16,10 @@ import functools
 import datetime
 import time
 import warnings
+import pickle
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-save_on_scan_end = False
+SAVE_ON_SCAN_END = False
 
 def movement_wrapper(f, mute = False):
     @functools.wraps(f)
@@ -660,6 +661,23 @@ class RobotStartWidget(QtWidgets.QWidget):
         size_policy = QtWidgets.QSizePolicy()
         self.setSizePolicy(size_policy)
 
+class DataFileWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(DataFileWidget, self).__init__(parent)
+        self.horizontalLayout = QtWidgets.QHBoxLayout(self)
+
+        self.filename_textbox = QtWidgets.QLineEdit()
+        self.button_save_points = QtWidgets.QPushButton()
+        self.button_load_points = QtWidgets.QPushButton()
+        # TODO: saving files as dataframes
+
+        self.button_save_points.setText("Save points as .nb")
+        self.button_load_points.setText("Load points from .nb")
+
+        self.horizontalLayout.addWidget(self.filename_textbox)
+        self.horizontalLayout.addWidget(self.button_save_points)
+        self.horizontalLayout.addWidget(self.button_load_points)
+
 class FeedbackWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, type = "XYZ scan"):
         super(FeedbackWidget, self).__init__(parent)
@@ -761,6 +779,10 @@ class PlotWidget(QtWidgets.QWidget):
         self.VLayout = QtWidgets.QVBoxLayout(self)
         self.figure = Figure(figsize=(5, 4), dpi=100)
         self.canvas = FigureCanvas(self.figure)
+        size_policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, QtWidgets.QSizePolicy.Policy.MinimumExpanding)
+        size_policy.setRetainSizeWhenHidden(True)
+        # self.canvas.setMinimumWidth(40)
+        self.canvas.setSizePolicy(size_policy)
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.VLayout.addWidget(self.toolbar)
         self.VLayout.addWidget(self.canvas)
@@ -800,7 +822,6 @@ class ScanPlotWidget(PlotWidget):
         super(ScanPlotWidget, self).__init__(parent)
         self.gridLayout = QtWidgets.QGridLayout()
 
-        self.gridLayout = QtWidgets.QGridLayout()
         self.plot_format_combobox = QtWidgets.QComboBox()
         self.slice_direction_combobox = QtWidgets.QComboBox()
         self.checkbox_scatter = QtWidgets.QRadioButton()
@@ -830,23 +851,33 @@ class ScanPlotWidget(PlotWidget):
         self.gridLayout.addWidget(self.frequency_textfield, 3, 1, 1, 1)
         self.gridLayout.addWidget(self.frequency_slider, 3, 2, 1, 1)
 
-        self.horizontalLayout = QtWidgets.QHBoxLayout()
-        self.button_save_current_points = QtWidgets.QPushButton()
-        self.button_save_all_points_at_frequency = QtWidgets.QPushButton()
-        self.button_save_all_points = QtWidgets.QPushButton()
-        #TODO: saving files as dataframes
-        self.button_save_current_points.setText("Save current slice as .txt")
-        self.button_save_all_points_at_frequency.setText("Save all points at current frequency as .nb")
-        self.button_save_all_points.setText("Save all points as .nb")
-
-        self.horizontalLayout.addWidget(self.button_save_current_points)
-        self.horizontalLayout.addWidget(self.button_save_all_points_at_frequency)
-        self.horizontalLayout.addWidget(self.button_save_all_points)
-
         self.VLayout.addLayout(self.gridLayout)
-        self.VLayout.addLayout(self.horizontalLayout)
 
         self.ax_scan = self.figure.add_subplot(111)
+
+
+class SlicePlotWidget(PlotWidget):
+    def __init__(self, parent=None):
+        super(SlicePlotWidget, self).__init__(parent)
+        self.gridLayout = QtWidgets.QGridLayout()
+        self.slice_direction_combobox = QtWidgets.QComboBox()
+        self.coordinate_label = QtWidgets.QLabel()
+        self.coordinate_textfield = QtWidgets.QLineEdit()
+        self.coordinate_slider = QtWidgets.QSlider()
+        self.coordinate_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
+
+        self.slice_directions = {"Horizontal": 0, "Vertical": 1}
+        self.slice_direction_combobox.addItems(self.slice_directions.keys())
+
+        self.coordinate_label.setText("Change coordinate to (mm):")
+        self.gridLayout.addWidget(self.slice_direction_combobox, 1, 0, 1, 3)
+        self.gridLayout.addWidget(self.coordinate_label, 2, 0, 1, 1)
+        self.gridLayout.addWidget(self.coordinate_textfield, 2, 1, 1, 1)
+        self.gridLayout.addWidget(self.coordinate_slider, 2, 2, 1, 1)
+        self.ax_slice = self.figure.add_subplot(111)
+
+
+        self.VLayout.addLayout(self.gridLayout)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -857,7 +888,6 @@ class MainWindow(QtWidgets.QMainWindow):
     send_robot_to_init = QtCore.pyqtSignal()
     send_settle_time = QtCore.pyqtSignal(float)
     send_acquisition_time = QtCore.pyqtSignal(float)
-    #TODO: 1D slice tab
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
         self.configs = Config("aaa.toml")
@@ -869,9 +899,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.movement_lock = threading.Lock()
 
         self.previous_time = 0
+        self.coord_dict = {"X": 0, "Y": 1, "Z": 2}
 
         self.robot_connected = False
-        for w in (self.manualCTab,self.scan_parameters_widget, self.scan_plot_w):
+        self.scan_finished = False
+        for w in (self.manualCTab,self.scan_parameters_widget, self.scan_plot_w, self.slice_plot_w):
             w.setEnabled(False)
 
         self.connection_widget.vna_ip_lineEdit.setText(self.configs.VNA_settings["ip"])
@@ -913,16 +945,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
 
+        self.file_widget.button_save_points.clicked.connect(lambda: self.save_data_file(self.file_widget.filename_textbox.text()))
+        self.file_widget.button_load_points.clicked.connect(lambda: self.load_data_file(self.file_widget.filename_textbox.text()))
+
         self.run_on_robot = False
         self.robot_start_widget.simulate_pushButton.clicked.connect(self.run_program_in_sim)
         self.robot_start_widget.run_pushButton.clicked.connect(self.run_program_on_robot)
 
         self.scan_plot_w.frequency_slider.valueChanged.connect(self.frequency_slider_changed)
-        self.scan_plot_w.frequency_slider.sliderPressed.connect(lambda: self.freq_select_vline.set_visible(True))
-        self.scan_plot_w.frequency_slider.sliderReleased.connect(lambda: self.freq_select_vline.set_visible(False))
+        if self.vna_connected:
+            self.scan_plot_w.frequency_slider.sliderPressed.connect(lambda: self.freq_select_vline.set_visible(True))
+            self.scan_plot_w.frequency_slider.sliderReleased.connect(lambda: self.freq_select_vline.set_visible(False))
         self.scan_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
         self.scan_plot_w.plot_format_combobox.currentTextChanged.connect(self.scan_plot_update)
         self.scan_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed)
+
+        self.slice_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
+        self.slice_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed_slice)
 
 
     def minus_button_pressed(self):
@@ -1011,6 +1050,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # x = threading.Thread(target=self.test_scan)
         # x = QtCore.QThread
         # x.start()
+        self.scan_started = 1
         self.scan_xyz()
         # self.test_scan()
 
@@ -1019,6 +1059,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             points_axes = []
             shape = []
+
             self.update_estimated_scan_time()
             for param in self.scan_parameters_widget.params_rows[2:]:
                 min = float(param[1].text())
@@ -1035,8 +1076,10 @@ class MainWindow(QtWidgets.QMainWindow):
             dir_y = 1
             dir_z = 1
             self.data = np.empty(shape, dtype= complex)
-            X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
+            # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
             self.data[:] = np.nan
+            self.scan_plot_initialize()
+            self.slice_plot_initialize()
             self.update_coord_slider()
         # except ValueError:
         #     print('Inputted value is invalid')
@@ -1054,8 +1097,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 dir_y *= -1
             self.send_robot_to_scan_init.emit()
             # print(self.data)
-        except ValueError:
-            print('Inputted value is invalid')
+        except ValueError as err:
+            print('Inputted value is invalid\n' + str(err))
 
     @QtCore.pyqtSlot(tuple, tuple)
     def scan_data_add_point(self, index_tuple, dir_tuple):
@@ -1093,16 +1136,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def robot_scan_finished(self):
         self.statusbar.setStyleSheet("background-color: green")
         self.robot_busy = False
+        self.scan_finished = True
+        self.slice_plot_initialize()
         current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
 
         if self.vna_connected:
             self.instr.write_bool("INITiate:CONTinuous:ALL", True)
 
-        if save_on_scan_end:
-            np.save(f"{current_time}.npy", self.data)
-            np.savetxt(f"{current_time}_coords_x.txt", np.array(scan_points[0]))
-            np.savetxt(f"{current_time}_coords_y.txt", np.array(scan_points[1]))
-            np.savetxt(f"{current_time}_coords_z.txt", np.array(scan_points[2]))
+        if SAVE_ON_SCAN_END:
+            self.save_data_file(current_time)
 
 
     @QtCore.pyqtSlot()
@@ -1110,7 +1152,25 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.vna_connected:
             self.instr.write("INITiate:IMMediate:ALL")
 
+    def save_data_file(self,filename):
+        np.save(f"{filename}.npy", self.data)
+        pickle.dump(self.scan_coords+[self.freq_arr],open(f"{filename}.pkl","wb"))
 
+    def load_data_file(self,filename):
+        # filename = "2024_03_26_21-48-18"
+        try:
+            self.data = np.load(f"{filename}.npy")
+            temp_list = pickle.load(open(f"{filename}.pkl","rb"))
+            print(temp_list)
+            self.scan_coords = temp_list[:-1]
+            self.freq_arr = np.array(temp_list[-1])
+            self.scan_plot_initialize()
+            self.slice_plot_initialize()
+            self.update_coord_slider()
+            self.scan_plot_w.setEnabled(True)
+            self.slice_plot_w.setEnabled(True)
+        except FileNotFoundError as err:
+            print(err)
 
     def run_program_on_robot(self):
         self.run_on_robot = True
@@ -1250,6 +1310,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.vna_parameters_widget.setEnabled(self.vna_connected)
         self.vna_plot_w.setEnabled(self.vna_connected)
         self.scan_plot_w.setEnabled(self.vna_connected)
+        self.slice_plot_w.setEnabled(self.vna_connected)
         if self.toggle_var:
             self.toggle()
 
@@ -1367,8 +1428,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
             self.plot_initialize(reset_trace_list = False)
             self.plot_initialize(reset_trace_list = False)
-        except ValueError:
-            print('Inputted value is invalid')
+        except ValueError as err:
+            print('Inputted value is invalid\n'+err)
 
     def update_VNA_settings(self):
         """Queries the VNA for the current settings and updates the text in the widget.
@@ -1437,31 +1498,52 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggle_var = not self.toggle_var
         self.button_text_update()
 
+    def scan_plot_initialize(self):
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data)
+        self.scan_plot_w.ax_scan.clear()
+        if hasattr(self,"meshplot"):
+            self.meshplot = None
+        slice_plane = self.scan_plot_w.slice_direction_combobox.currentText()
+        coord_1 = self.scan_coords[self.coord_dict[slice_plane[0]]]
+        coord_2 = self.scan_coords[self.coord_dict[slice_plane[1]]]
+        self.scan_plot_w.ax_scan.set_xlabel(f"Position along ${slice_plane[0].lower()}$, mm")
+        self.scan_plot_w.ax_scan.set_ylabel(f"Position along ${slice_plane[1].lower()}$, mm")
+        scan_slice = self.return_scan_slice(slice_plane,self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
+        self.meshplot = self.scan_plot_w.ax_scan.imshow(formatted_data[scan_slice].T,origin ="lower")
+        d1 = (coord_1.max()-coord_1.min())/(len(coord_1)-1)/2
+        d2 = (coord_2.max() - coord_2.min()) / (len(coord_2)-1)/2
+        extent = [coord_1.min()-d1,coord_1.max()+d1,coord_2.min()-d2,coord_2.max()+d2]
+        self.meshplot.set_extent(extent)
+
+        self.scan_plot_w.hline = self.scan_plot_w.ax_scan.axhline(0, visible=1, color="k")
+        self.scan_plot_w.vline = self.scan_plot_w.ax_scan.axvline(0, visible=1, color="k")
+        self.scan_plot_w.line_dict = {0:self.scan_plot_w.hline,1:self.scan_plot_w.vline}
+
+        self.scan_plot_w.figure.tight_layout()
+        self.scan_plot_w.canvas.draw()
+        self.scan_plot_update()
+
+    def return_scan_slice(self,slice_plane,c,f):
+        if slice_plane == "XY":
+            slice = np.index_exp[:,:,c,f]
+        elif slice_plane == "XZ":
+            slice = np.index_exp[:,c,:,f]
+        elif slice_plane == "YZ":
+            slice = np.index_exp[c,:,:,f]
+        return slice
+
+    def return_scan_slice_2(self, slice_plane, c):
+        if slice_plane == "Horizontal":
+            slice = np.index_exp[:, c]
+        elif slice_plane == "Vertical":
+            slice = np.index_exp[c, :]
+        return slice
 
     def scan_plot_update(self):
         formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data)
-        if self.scan_plot_w.slice_direction_combobox.currentText() == "XY":
-                X_grid, Y_grid = np.meshgrid(self.scan_coords[0], self.scan_coords[1])
-                self.scan_plot_w.ax_scan.clear()
-                self.scan_plot_w.ax_scan.set_xlabel("Position along $x$, mm")
-                self.scan_plot_w.ax_scan.set_ylabel("Position along $y$, mm")
-                self.scan_plot_w.ax_scan.pcolormesh(X_grid, Y_grid, formatted_data[:, :,
-                                                                self.scan_plot_w.coordinate_slider.value(),
-                                                                self.scan_plot_w.frequency_slider.value()].T, shading='nearest')
-        elif self.scan_plot_w.slice_direction_combobox.currentText() == "XZ":
-                X_grid, Z_grid = np.meshgrid(self.scan_coords[0], self.scan_coords[2])
-                self.scan_plot_w.ax_scan.clear()
-                self.scan_plot_w.ax_scan.set_xlabel("Position along $x$, mm")
-                self.scan_plot_w.ax_scan.set_ylabel("Position along $z$, mm")
-                self.scan_plot_w.ax_scan.pcolormesh(X_grid, Z_grid, formatted_data[:,self.scan_plot_w.coordinate_slider.value(), :,
-                                                                self.scan_plot_w.frequency_slider.value()].T, shading='nearest')
-        elif self.scan_plot_w.slice_direction_combobox.currentText() == "YZ":
-                Y_grid, Z_grid = np.meshgrid(self.scan_coords[1], self.scan_coords[2])
-                self.scan_plot_w.ax_scan.clear()
-                self.scan_plot_w.ax_scan.set_xlabel("Position along $y$, mm")
-                self.scan_plot_w.ax_scan.set_ylabel("Position along $z$, mm")
-                self.scan_plot_w.ax_scan.pcolormesh(Y_grid, Z_grid, formatted_data[self.scan_plot_w.coordinate_slider.value(),:, :,
-                                                                self.scan_plot_w.frequency_slider.value()].T, shading='nearest')
+        scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
+        self.meshplot.set_data(formatted_data[scan_slice].T)
+        self.meshplot.autoscale()
         self.scan_plot_w.canvas.draw()
 
     def set_slider(self, value, slider):
@@ -1476,10 +1558,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # print(self.textfield_frequency_slider.value())
         self.new_frequency = self.freq_arr[self.scan_plot_w.frequency_slider.value()]
         self.scan_plot_w.frequency_textfield.setText(f"{self.new_frequency:.2f}")
-        self.freq_select_vline.set_xdata([self.new_frequency, self.new_frequency])
+        if self.vna_connected:
+            self.freq_select_vline.set_xdata([self.new_frequency, self.new_frequency])
         # self.new_frequency_index = self.find_nearest_frequency_point(self.new_frequency)
         self.vna_plot_w.canvas.draw()
         self.scan_plot_update()
+        self.slice_plot_update()
 
     def find_nearest_frequency_point(self, value):
         return np.argmin(np.abs(self.freq_arr - value))
@@ -1491,12 +1575,68 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_plot_w.coordinate_textfield.setText(str(self.new_coordinate))
         # self.coord_select_vline.set_xdata([self.new_coordinate, self.new_coordinate])
         self.scan_plot_update()
+        self.slice_plot_update()
+
+    def coordinate_slider_changed_slice(self):
+        dir = self.slice_plot_w.slice_directions[
+                    self.slice_plot_w.slice_direction_combobox.currentText()]
+        coord_arr = self.scan_coords[self.coord_dict[
+            self.scan_plot_w.slice_direction_combobox.currentText()[not dir]]]
+        self.new_coordinate = coord_arr[self.slice_plot_w.coordinate_slider.value()]
+        self.slice_plot_w.coordinate_textfield.setText(str(self.new_coordinate))
+        scan_line = self.scan_plot_w.line_dict[dir]
+        (scan_line.set_ydata,scan_line.set_xdata)[dir]((self.new_coordinate,self.new_coordinate))
+        self.slice_plot_update()
+        self.scan_plot_w.canvas.draw()
 
     def update_coord_slider(self):
         self.scan_plot_w.coordinate_slider.setRange(0,
             len(self.scan_coords[self.scan_plot_w.slice_directions[self.scan_plot_w.slice_direction_combobox.currentText()]])-1)
+        slice_range = len(self.scan_coords[self.coord_dict[
+                self.scan_plot_w.slice_direction_combobox.currentText()[not
+                    self.slice_plot_w.slice_directions[
+                        self.slice_plot_w.slice_direction_combobox.currentText()]]]])-1
+        self.slice_plot_w.coordinate_slider.setRange(0,slice_range)
         if self.vna_connected:
-            self.scan_plot_update()
+            self.scan_plot_initialize()
+            self.slice_plot_initialize()
+
+    def slice_plot_initialize(self):
+        self.slice_plot_w.ax_slice.clear()
+        self.slice_plot_w.ax_slice.set_xlabel('Coord')
+        self.slice_plot_w.ax_slice.set_ylabel(self.scan_plot_w.plot_format_combobox.currentText())
+        coords = self.scan_coords[self.coord_dict[
+            self.scan_plot_w.slice_direction_combobox.currentText()[
+            self.slice_plot_w.slice_directions[
+                self.slice_plot_w.slice_direction_combobox.currentText()]]]]
+        scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),
+                                            self.scan_plot_w.coordinate_slider.value(),
+                                            self.scan_plot_w.frequency_slider.value())
+        scan_slice_2 = self.return_scan_slice_2(self.slice_plot_w.slice_direction_combobox.currentText(),
+                                                min(self.slice_plot_w.coordinate_slider.value(),len(coords)-1))
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data[scan_slice])
+        self.sliceplot, = self.slice_plot_w.ax_slice.plot(coords,formatted_data[scan_slice_2])
+        self.slice_plot_w.ax_slice.set_xlim(coords.min(),coords.max())
+
+
+    def slice_plot_update(self):
+        scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),
+                                            self.scan_plot_w.coordinate_slider.value(),
+                                            self.scan_plot_w.frequency_slider.value())
+        scan_slice_2 = self.return_scan_slice_2(self.slice_plot_w.slice_direction_combobox.currentText(),
+                                                self.slice_plot_w.coordinate_slider.value())
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](
+            self.data[scan_slice])
+        if len(formatted_data[scan_slice_2]) == len(self.sliceplot.get_ydata()):
+            self.sliceplot.set_ydata(formatted_data[scan_slice_2])
+            try:
+                self.slice_plot_w.ax_slice.set_ylim(np.nanmin(formatted_data), np.nanmax(formatted_data))
+            except ValueError:
+                pass
+            self.slice_plot_w.canvas.draw()
+        else:
+            self.slice_plot_initialize()
+
 
     def initialize_connectionTab(self):
         connectionTab = QtWidgets.QWidget()
@@ -1575,6 +1715,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gridLayout_6 = QtWidgets.QGridLayout(scan_tab)
         self.xyzS_VLayout = QtWidgets.QVBoxLayout()
         self.scan_parameters_widget = ScanParametersWidget()
+
         self.xyzS_VLayout.addWidget(self.scan_parameters_widget)
 
         self.scan_types = ["XYZ scan","Spherical scan"]
@@ -1585,6 +1726,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.xyzS_VLayout.addWidget(self.scan_type_combobox)
         spacerItem3 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
                                             QtWidgets.QSizePolicy.Policy.Expanding)
+        self.file_widget = DataFileWidget()
+        self.xyzS_VLayout.addWidget(self.file_widget)
         self.xyzS_VLayout.addItem(spacerItem3)
 
         self.vna_parameters_widget = VNAParametersWidget()
@@ -1649,7 +1792,14 @@ class MainWindow(QtWidgets.QMainWindow):
         MainWindow.addDockWidget(QtCore.Qt.DockWidgetArea(2), self.scanDockWidget)
         self.scanDockWidget.setWindowTitle("Scanned points")
 
+        self.slice_plot_w = SlicePlotWidget()
+        self.sliceDockWidget = QtWidgets.QDockWidget(parent=MainWindow)
+        self.sliceDockWidget.setWidget(self.slice_plot_w)
+        MainWindow.addDockWidget(QtCore.Qt.DockWidgetArea(2), self.sliceDockWidget)
+        self.sliceDockWidget.setWindowTitle("Field map slice")
+
         MainWindow.tabifyDockWidget(self.tracesDockWidget,self.scanDockWidget)
+        MainWindow.tabifyDockWidget(self.scanDockWidget,self.sliceDockWidget)
         self.tracesDockWidget.raise_()
 
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
