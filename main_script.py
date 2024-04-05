@@ -76,11 +76,18 @@ class RobotMovementMonitorObject(QtCore.QObject):
                 self.rdk_instance.robot.Stop()
 
     def coords_check(self):
-        coords = robomath.Pose_2_KUKA(self.rdk_instance.robot.SolveFK(self.rdk_instance.robot.Joints(),tool=self.rdk_instance.robot.PoseTool()))
-        x, y, z = coords[:3]
-        in_box = (-100 < x - 867 < 100) and (-100 < y < 100) and (100 < z < 700)
-        if in_box and not self.robot_in_box:
-            self.restart_signal.emit()
+        joints = self.rdk_instance.robot.Joints()
+        if len(joints.rows) == 6:
+            coords = robomath.Pose_2_KUKA(self.rdk_instance.robot.SolveFK(joints,tool=self.rdk_instance.robot.PoseTool()))
+            x, y, z = coords[:3] #520,0,502
+            in_box = (420. < (x - 446.14) < 620.) and (-200. < y < 200.) and (300. < z < 700.)
+            # in_box = (420. < (x - 446.14) < 620.) and (-20. < y < 20.) and (300. < z < 700.)
+            if not in_box:
+                print(joints)
+            if in_box and not self.robot_in_box:
+                self.restart_signal.emit()
+        else:
+            in_box = self.robot_in_box
         return in_box
 
 
