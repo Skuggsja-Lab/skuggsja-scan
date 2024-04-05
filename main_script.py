@@ -1,6 +1,7 @@
 from PyQt6 import QtCore, QtGui, QtWidgets
 import sys
 import numpy as np
+import scipy as sp
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -10,7 +11,6 @@ from robodk_functions import RDK_KUKA
 import robodk.robomath as robomath
 from robodk.robolink import TargetReachError, StoppedError
 # from robodk.robomath import *
-import numpy as np
 import threading
 import functools
 import datetime
@@ -130,6 +130,28 @@ class RobotMovementObject(QtCore.QObject):
             # coord_tuple, index_tuple, dir_tuple, settle_time
             x, y, z = coord_tuple
             new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+            self.rdk_instance.target_scan.setPose(new_pose)
+            if len(self.rdk_instance.robot.SolveIK(new_pose,tool = self.rdk_instance.robot.PoseTool()).tolist()) == 6:
+                self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
+            else:
+                print("Target coordinates are inaccessible")
+            # print(coord_tuple)
+            time.sleep(self.settle_time)
+            self.ready_for_acquisition.emit()
+            time.sleep(self.acquisition_time)
+            self.arrived_at_point.emit(index_tuple, dir_tuple)
+            self.finished_movement.emit()
+
+    @QtCore.pyqtSlot(tuple,tuple,tuple)
+    @movement_wrapper_robot_internal
+    def move_robot_to_point_scan_sph(self,coord_tuple=None, index_tuple=None,
+                                 dir_tuple=None):
+        if coord_tuple != None:
+            self.began_movement.emit()
+            # coord_tuple, index_tuple, dir_tuple, settle_time
+            phi, theta, r = coord_tuple
+            # new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+            new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x =0, y =0, z=0,rx=theta,ry=phi))
             self.rdk_instance.target_scan.setPose(new_pose)
             if len(self.rdk_instance.robot.SolveIK(new_pose,tool = self.rdk_instance.robot.PoseTool()).tolist()) == 6:
                 self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
@@ -824,7 +846,7 @@ class ScanPlotWidget(PlotWidget):
 
         self.plot_format_combobox = QtWidgets.QComboBox()
         self.slice_direction_combobox = QtWidgets.QComboBox()
-        self.checkbox_scatter = QtWidgets.QRadioButton()
+        self.checkbox_fft = QtWidgets.QRadioButton()
         self.coordinate_label = QtWidgets.QLabel()
         self.coordinate_textfield = QtWidgets.QLineEdit()
         self.coordinate_slider = QtWidgets.QSlider()
@@ -834,7 +856,8 @@ class ScanPlotWidget(PlotWidget):
         self.frequency_slider = QtWidgets.QSlider()
         self.frequency_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
 
-        self.checkbox_scatter.setText("Plot Format: line/scatter")
+        self.checkbox_fft.setText("2D XY FFT")
+        self.checkbox_fft.setEnabled(False)
         self.coordinate_label.setText("Change coordinate to (mm):")
         self.frequency_label.setText("Change frequency to (GHz):")
         self.plot_format_combobox.addItems(self.plot_formats.keys())
@@ -842,7 +865,7 @@ class ScanPlotWidget(PlotWidget):
         self.slice_direction_combobox.addItems(self.slice_directions.keys())
 
         self.gridLayout.addWidget(self.plot_format_combobox, 1, 0, 1, 2)
-        self.gridLayout.addWidget(self.checkbox_scatter, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.checkbox_fft, 1, 2, 1, 1)
         self.gridLayout.addWidget(self.slice_direction_combobox, 2, 0, 1, 2)
         self.gridLayout.addWidget(self.coordinate_label, 4, 0, 1, 1)
         self.gridLayout.addWidget(self.coordinate_textfield, 4, 1, 1, 1)
@@ -882,6 +905,7 @@ class SlicePlotWidget(PlotWidget):
 
 class MainWindow(QtWidgets.QMainWindow):
     send_movement_coords_scan = QtCore.pyqtSignal(tuple,tuple,tuple)
+    send_movement_coords_scan_sph = QtCore.pyqtSignal(tuple, tuple, tuple)
     send_movement_coords_rel = QtCore.pyqtSignal(tuple)
     send_movement_coords_abs = QtCore.pyqtSignal(tuple)
     send_robot_to_scan_init = QtCore.pyqtSignal()
@@ -900,6 +924,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.previous_time = 0
         self.coord_dict = {"X": 0, "Y": 1, "Z": 2}
+        self.fft_padding = 1
 
         self.robot_connected = False
         self.scan_finished = False
@@ -958,6 +983,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scan_plot_w.frequency_slider.sliderReleased.connect(lambda: self.freq_select_vline.set_visible(False))
         self.scan_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
         self.scan_plot_w.plot_format_combobox.currentTextChanged.connect(self.scan_plot_update)
+        self.scan_plot_w.checkbox_fft.clicked.connect(self.scan_plot_update)
         self.scan_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed)
 
         self.slice_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
@@ -1051,7 +1077,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # x = QtCore.QThread
         # x.start()
         self.scan_started = 1
-        self.scan_xyz()
+        if self.scan_type_combobox.currentText() == "XYZ scan":
+            self.scan_xyz()
+        elif self.scan_type_combobox.currentText() == "Spherical scan":
+            self.scan_sph()
+        else:
+            pass
         # self.test_scan()
 
     @movement_wrapper
@@ -1100,6 +1131,55 @@ class MainWindow(QtWidgets.QMainWindow):
         except ValueError as err:
             print('Inputted value is invalid\n' + str(err))
 
+    @movement_wrapper
+    def scan_sph(self):
+        try:
+            points_axes = []
+            shape = []
+
+            self.update_estimated_scan_time()
+            for param in self.scan_parameters_widget.params_rows[3:]:
+                min = float(param[1].text())
+                max = float(param[3].text())
+                steps = int(param[5].text())
+                shape.append(steps)
+                points_axes.append(np.linspace(min,max,steps))
+            points_axes.append(np.array((float(self.scan_parameters_widget.params_rows[2][1].text()),)))
+            shape.append(1)
+            self.scan_coords = points_axes
+            self.delta=[]
+            if self.vna_connected:
+                shape.append(len(self.freq_arr))
+                self.instr.write_bool("INITiate:CONTinuous:ALL",False)
+            dir_phi = 1
+            dir_theta = 1
+            dir_r = 1
+            self.data = np.empty(shape, dtype= complex)
+            # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
+            self.data[:] = np.nan
+            if self.vna_connected:
+                self.scan_plot_initialize()
+                self.slice_plot_initialize()
+                self.update_coord_slider()
+        # except ValueError:
+        #     print('Inputted value is invalid')
+        # try:
+            for ir, r in enumerate(points_axes[2][::dir_r]):
+                for itheta, theta in enumerate(points_axes[1][::dir_theta]):
+                    for iphi, phi in enumerate(points_axes[0][::dir_phi]):
+                        settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
+                        self.send_settle_time.emit(settle_time)
+                        if self.vna_connected:
+                            acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
+                            self.send_acquisition_time.emit(acq_time)
+                        self.send_movement_coords_scan_sph.emit((phi,theta,r),(iphi,itheta,ir),(dir_phi,dir_theta,dir_r))
+                    dir_phi *= -1
+                dir_theta *= -1
+            self.send_robot_to_scan_init.emit()
+            # print(self.data)
+        except ValueError as err:
+            print('Inputted value is invalid\n' + str(err))
+
     @QtCore.pyqtSlot(tuple, tuple)
     def scan_data_add_point(self, index_tuple, dir_tuple):
         ix, iy, iz = index_tuple
@@ -1137,11 +1217,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusbar.setStyleSheet("background-color: green")
         self.robot_busy = False
         self.scan_finished = True
-        self.slice_plot_initialize()
+
         current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
 
         if self.vna_connected:
+            self.slice_plot_initialize()
             self.instr.write_bool("INITiate:CONTinuous:ALL", True)
+            self.data_fft = sp.fft.fftshift(
+                sp.fft.fft2(self.data, s=(self.data.shape[0] * self.fft_padding, self.data.shape[1] * self.fft_padding), axes=(0, 1)),
+                axes=(0, 1))
+            self.scan_plot_w.checkbox_fft.setEnabled(True)
 
         if SAVE_ON_SCAN_END:
             self.save_data_file(current_time)
@@ -1160,15 +1245,28 @@ class MainWindow(QtWidgets.QMainWindow):
         # filename = "2024_03_26_21-48-18"
         try:
             self.data = np.load(f"{filename}.npy")
+
+            # self.data = sp.fft.fftshift(sp.fft.fft(self.data, axis=3),axes=3)
             temp_list = pickle.load(open(f"{filename}.pkl","rb"))
             print(temp_list)
+            self.scan_plot_w.checkbox_fft.setChecked(False)
             self.scan_coords = temp_list[:-1]
             self.freq_arr = np.array(temp_list[-1])
             self.scan_plot_initialize()
             self.slice_plot_initialize()
             self.update_coord_slider()
+            self.scan_plot_w.frequency_slider.setRange(0, len(self.freq_arr) - 1)
             self.scan_plot_w.setEnabled(True)
             self.slice_plot_w.setEnabled(True)
+            window1d1 = sp.signal.windows.hamming(self.data.shape[0])
+            window1d2 = sp.signal.windows.hamming(self.data.shape[1])
+            # window2d = np.moveaxis(np.tile(np.moveaxis(np.tile(np.sqrt(np.outer(window1d1, window1d2)),(1,1,self.data.shape[2])),0,-1),(1,1,1,self.data.shape[3])),0,-1)
+            window2d = np.sqrt(np.outer(window1d1, window1d2))
+            data_temp = np.einsum("ij,ijkm->ijkm", window2d, self.data)
+            self.data_fft = sp.fft.fftshift(
+                sp.fft.fft2(data_temp, s=(self.data.shape[0] * self.fft_padding, self.data.shape[1] * self.fft_padding), axes=(0, 1)),
+                axes=(0, 1))
+            self.scan_plot_w.checkbox_fft.setEnabled(True)
         except FileNotFoundError as err:
             print(err)
 
@@ -1240,6 +1338,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def connect_robot_signals(self):
         self.send_movement_coords_scan.connect(self.worker.move_robot_to_point_scan)
+        self.send_movement_coords_scan_sph.connect(self.worker.move_robot_to_point_scan_sph)
         self.send_movement_coords_rel.connect(self.worker.move_robot_relative)
         self.send_movement_coords_abs.connect(self.worker.move_robot_to_coordinate)
         self.send_robot_to_scan_init.connect(self.worker.move_robot_to_init_scan)
@@ -1499,7 +1598,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.button_text_update()
 
     def scan_plot_initialize(self):
-        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data)
+        if self.scan_plot_w.checkbox_fft.isChecked():
+            data = self.data_fft
+        else:
+            data = self.data
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data)
         self.scan_plot_w.ax_scan.clear()
         if hasattr(self,"meshplot"):
             self.meshplot = None
@@ -1508,6 +1611,9 @@ class MainWindow(QtWidgets.QMainWindow):
         coord_2 = self.scan_coords[self.coord_dict[slice_plane[1]]]
         self.scan_plot_w.ax_scan.set_xlabel(f"Position along ${slice_plane[0].lower()}$, mm")
         self.scan_plot_w.ax_scan.set_ylabel(f"Position along ${slice_plane[1].lower()}$, mm")
+        if self.scan_type_combobox.currentText() == "Spherical scan":
+            self.scan_plot_w.ax_scan.set_xlabel(f"Position along $\\phi$, degrees")
+            self.scan_plot_w.ax_scan.set_ylabel(f"Position along $\\theta$, degrees")
         scan_slice = self.return_scan_slice(slice_plane,self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
         self.meshplot = self.scan_plot_w.ax_scan.imshow(formatted_data[scan_slice].T,origin ="lower")
         d1 = (coord_1.max()-coord_1.min())/(len(coord_1)-1)/2
@@ -1540,7 +1646,12 @@ class MainWindow(QtWidgets.QMainWindow):
         return slice
 
     def scan_plot_update(self):
-        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data)
+        # formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data)
+        if self.scan_plot_w.checkbox_fft.isChecked():
+            data = self.data_fft
+        else:
+            data = self.data
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data)
         scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
         self.meshplot.set_data(formatted_data[scan_slice].T)
         self.meshplot.autoscale()
@@ -1614,7 +1725,12 @@ class MainWindow(QtWidgets.QMainWindow):
                                             self.scan_plot_w.frequency_slider.value())
         scan_slice_2 = self.return_scan_slice_2(self.slice_plot_w.slice_direction_combobox.currentText(),
                                                 min(self.slice_plot_w.coordinate_slider.value(),len(coords)-1))
-        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data[scan_slice])
+        if self.scan_plot_w.checkbox_fft.isChecked():
+            data = self.data_fft
+            coords = np.linspace(coords.min(),coords.max(),coords.size*self.fft_padding)
+        else:
+            data = self.data
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data[scan_slice])
         self.sliceplot, = self.slice_plot_w.ax_slice.plot(coords,formatted_data[scan_slice_2])
         self.slice_plot_w.ax_slice.set_xlim(coords.min(),coords.max())
 
@@ -1625,8 +1741,12 @@ class MainWindow(QtWidgets.QMainWindow):
                                             self.scan_plot_w.frequency_slider.value())
         scan_slice_2 = self.return_scan_slice_2(self.slice_plot_w.slice_direction_combobox.currentText(),
                                                 self.slice_plot_w.coordinate_slider.value())
+        if self.scan_plot_w.checkbox_fft.isChecked():
+            data = self.data_fft
+        else:
+            data = self.data
         formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](
-            self.data[scan_slice])
+            data[scan_slice])
         if len(formatted_data[scan_slice_2]) == len(self.sliceplot.get_ydata()):
             self.sliceplot.set_ydata(formatted_data[scan_slice_2])
             try:
