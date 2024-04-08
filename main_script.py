@@ -9,6 +9,7 @@ import RsInstrument
 from skuggsja_config import Config
 from robodk_functions import RDK_KUKA
 import robodk.robomath as robomath
+import robodk.robolinkutils as robolinkutils
 from robodk.robolink import TargetReachError, StoppedError
 # from robodk.robomath import *
 import threading
@@ -55,7 +56,7 @@ class RobotMovementMonitorObject(QtCore.QObject):
     def coords_check_loop(self):
         try:
             while self.robot_in_box:
-                self.robot_in_box = self.coords_check()
+                    self.robot_in_box = self.coords_check()
                 # if self.robot_in_box == False:
                 #     self.rdk_instance.robot.Stop()
                 #     self.kill_signal.emit()
@@ -65,6 +66,7 @@ class RobotMovementMonitorObject(QtCore.QObject):
                 self.rdk_instance.robot.Stop()
                 self.kill_signal.emit()
                 self.block_loop()
+                print("Collision detected at ",robomath.Pose_2_KUKA(self.rdk_instance.robot.SolveFK(self.rdk_instance.robot.Joints(),tool=self.rdk_instance.robot.PoseTool())))
                 # self.rdk_instance.Disconnect()
         except (ConnectionError, OSError):
             print("Command unsuccessful since connection has been closed")
@@ -118,15 +120,14 @@ class RobotMovementObject(QtCore.QObject):
         self.rdk_instance = RDK_KUKA(quit_on_close = True)
         self.monitor = RobotMovementMonitorObject()
         self.monitor_thread = QtCore.QThread()
-        self.monitor.moveToThread(self.monitor_thread)
-        self.monitor_thread.started.connect(self.monitor.coords_check_loop)
-        self.monitor_thread.start()
+        # self.monitor.moveToThread(self.monitor_thread)
+        # self.monitor_thread.started.connect(self.monitor.coords_check_loop)
+        # self.monitor_thread.start()
         self.can_move = True
-        self.monitor.kill_signal.connect(self.killswitch_recieved)
-        self.monitor.kill_signal.connect(self.monitor_thread.quit)
+        # self.monitor.kill_signal.connect(self.killswitch_recieved)
+        # self.monitor.kill_signal.connect(self.monitor_thread.quit)
         self.settle_time = 0
         self.acquisition_time = 0
-
 
     @QtCore.pyqtSlot(tuple,tuple,tuple)
     @movement_wrapper_robot_internal
@@ -138,10 +139,7 @@ class RobotMovementObject(QtCore.QObject):
             x, y, z = coord_tuple
             new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
             self.rdk_instance.target_scan.setPose(new_pose)
-            if len(self.rdk_instance.robot.SolveIK(new_pose,tool = self.rdk_instance.robot.PoseTool()).tolist()) == 6:
-                self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
-            else:
-                print("Target coordinates are inaccessible")
+            self.moveJointsSafe(new_pose)
             # print(coord_tuple)
             time.sleep(self.settle_time)
             self.ready_for_acquisition.emit()
@@ -160,10 +158,7 @@ class RobotMovementObject(QtCore.QObject):
             # new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
             new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x =0, y =0, z=0,rx=theta,ry=phi))
             self.rdk_instance.target_scan.setPose(new_pose)
-            if len(self.rdk_instance.robot.SolveIK(new_pose,tool = self.rdk_instance.robot.PoseTool()).tolist()) == 6:
-                self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
-            else:
-                print("Target coordinates are inaccessible")
+            self.moveJointsSafe(new_pose)
             # print(coord_tuple)
             time.sleep(self.settle_time)
             self.ready_for_acquisition.emit()
@@ -171,17 +166,35 @@ class RobotMovementObject(QtCore.QObject):
             self.arrived_at_point.emit(index_tuple, dir_tuple)
             self.finished_movement.emit()
 
+    def moveJointsSafe(self, new_pose):
+        if len(self.rdk_instance.robot.SolveIK(new_pose, tool=self.rdk_instance.robot.PoseTool()).tolist()) == 6:
+            config = np.squeeze(
+                self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints())[:3]).tolist()
+            joints = robolinkutils.SolveIK_Conf(self.rdk_instance.robot, new_pose,
+                                                toolpose=self.rdk_instance.robot.PoseTool(), joint_config=config)
+            print(self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints()))
+            # self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
+            if len(joints) > 0:
+                diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.target_init.Joints())[:, :6],
+                                                          (len(joints), 1))
+                print(diff)
+                print(np.linalg.norm(diff, axis=1))
+                print(diff[np.linalg.norm(diff, axis=1).argmin()])
+                best_config = diff[np.linalg.norm(diff, axis=1).argmin()]
+                self.rdk_instance.robot.MoveJ(joints[np.linalg.norm(diff, axis=1).argmin()])
+            else:
+                print("No suitable configuration found")
+        else:
+            print("Target coordinates are inaccessible")
+
     @QtCore.pyqtSlot(tuple)
     @movement_wrapper_robot_internal
     def move_robot_to_coordinate(self, coord_tuple):
         self.began_movement.emit()
         pose_to_move_to = robomath.KUKA_2_Pose(coord_tuple)
         # if len(self.rdk_instance.robot.SolveIK(pose_to_move_to).tolist()) == 6:
-        if len(self.rdk_instance.robot.SolveIK(pose_to_move_to,tool = self.rdk_instance.robot.PoseTool()).tolist()) == 6:
-            self.rdk_instance.target_rel.setPose(pose_to_move_to)
-            self.rdk_instance.robot.MoveJ(pose_to_move_to)
-        else:
-            print("Target coordinates are inaccessible")
+        self.rdk_instance.target_rel.setPose(pose_to_move_to)
+        self.moveJointsSafe(pose_to_move_to)
         self.finished_movement.emit()
 
     @QtCore.pyqtSlot(tuple)
@@ -1116,24 +1129,29 @@ class MainWindow(QtWidgets.QMainWindow):
             self.data = np.empty(shape, dtype= complex)
             # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
             self.data[:] = np.nan
-            self.scan_plot_initialize()
-            self.slice_plot_initialize()
-            self.update_coord_slider()
+            if self.vna_connected:
+                self.scan_plot_initialize()
+                self.slice_plot_initialize()
+                self.update_coord_slider()
+
+            self.scanpoint_data = []
+            self.scanpoint_index = 0
+
+            settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
+            self.send_settle_time.emit(settle_time)
+            if self.vna_connected:
+                acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
+                self.send_acquisition_time.emit(acq_time)
         # except ValueError:
         #     print('Inputted value is invalid')
         # try:
             for iz, z in enumerate(points_axes[2][::dir_z]):
                 for iy, y in enumerate(points_axes[1][::dir_y]):
                     for ix, x in enumerate(points_axes[0][::dir_x]):
-                        settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
-                        self.send_settle_time.emit(settle_time)
-                        if self.vna_connected:
-                            acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
-                            self.send_acquisition_time.emit(acq_time)
-                        self.send_movement_coords_scan.emit((x,y,z),(ix,iy,iz),(dir_x,dir_y,dir_z))
+                        self.scanpoint_data.append({'c':(x,y,z),'i':(ix,iy,iz),'d':(dir_x,dir_y,dir_z)})
                     dir_x *= -1
                 dir_y *= -1
-            self.send_robot_to_scan_init.emit()
+            self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'],self.scanpoint_data[0]['i'],self.scanpoint_data[0]['d'])
             # print(self.data)
         except ValueError as err:
             print('Inputted value is invalid\n' + str(err))
@@ -1143,7 +1161,6 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             points_axes = []
             shape = []
-
             self.update_estimated_scan_time()
             for param in self.scan_parameters_widget.params_rows[3:]:
                 min = float(param[1].text())
@@ -1168,21 +1185,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.scan_plot_initialize()
                 self.slice_plot_initialize()
                 self.update_coord_slider()
+
+            settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
+            self.send_settle_time.emit(settle_time)
+            if self.vna_connected:
+                acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
+                self.send_acquisition_time.emit(acq_time)
+
+            self.scanpoint_data = []
+            self.scanpoint_index = 0
         # except ValueError:
         #     print('Inputted value is invalid')
         # try:
             for ir, r in enumerate(points_axes[2][::dir_r]):
                 for itheta, theta in enumerate(points_axes[1][::dir_theta]):
                     for iphi, phi in enumerate(points_axes[0][::dir_phi]):
-                        settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
-                        self.send_settle_time.emit(settle_time)
-                        if self.vna_connected:
-                            acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
-                            self.send_acquisition_time.emit(acq_time)
-                        self.send_movement_coords_scan_sph.emit((phi,theta,r),(iphi,itheta,ir),(dir_phi,dir_theta,dir_r))
+                        self.scanpoint_data.append({'c':(phi,theta,r),'i':(iphi,itheta,ir),'d':(dir_phi,dir_theta,dir_r)})
+                        # self.send_movement_coords_scan_sph.emit((phi,theta,r),(iphi,itheta,ir),(dir_phi,dir_theta,dir_r))
                     dir_phi *= -1
                 dir_theta *= -1
-            self.send_robot_to_scan_init.emit()
+            print(self.scanpoint_data)
+            self.send_movement_coords_scan_sph.emit(self.scanpoint_data[0]['c'],self.scanpoint_data[0]['i'],self.scanpoint_data[0]['d'])
             # print(self.data)
         except ValueError as err:
             print('Inputted value is invalid\n' + str(err))
@@ -1204,6 +1227,20 @@ class MainWindow(QtWidgets.QMainWindow):
                         (index_tuple[1]) * self.data.shape[0] + \
                         (index_tuple[0])
         index_total =np.prod(self.data.shape[:3])
+        if self.scanpoint_index != index_current:
+            print("something went wrong, index mismatched")
+        else:
+            self.scanpoint_index +=1
+            if self.scanpoint_index < index_total:
+                if self.scan_type_combobox.currentText() == "XYZ scan":
+                    movement_signal = self.send_movement_coords_scan
+                elif self.scan_type_combobox.currentText() == "Spherical scan":
+                    movement_signal = self.send_movement_coords_scan_sph
+                movement_signal.emit(self.scanpoint_data[self.scanpoint_index]['c'],
+                                                        self.scanpoint_data[self.scanpoint_index]['i'],
+                                                        self.scanpoint_data[self.scanpoint_index]['d'])
+            else:
+                self.send_robot_to_scan_init.emit()
         self.scan_parameters_widget.scan_progressbar.setMaximum(index_total)
         self.scan_parameters_widget.scan_progressbar.setValue(index_current)
         message = f"Point {index_current + 1} out of {index_total}\n"
