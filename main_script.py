@@ -18,6 +18,8 @@ import datetime
 import time
 import warnings
 import pickle
+import glob
+import matplotlib.tri as mtri
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 SAVE_ON_SCAN_END = False
@@ -84,8 +86,6 @@ class RobotMovementMonitorObject(QtCore.QObject):
             x, y, z = coords[:3] #520,0,502
             in_box = (420. < (x - 446.14) < 620.) and (-200. < y < 200.) and (300. < z < 700.)
             # in_box = (420. < (x - 446.14) < 620.) and (-20. < y < 20.) and (300. < z < 700.)
-            if not in_box:
-                print(joints)
             if in_box and not self.robot_in_box:
                 self.restart_signal.emit()
         else:
@@ -706,19 +706,25 @@ class RobotStartWidget(QtWidgets.QWidget):
 class DataFileWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(DataFileWidget, self).__init__(parent)
-        self.horizontalLayout = QtWidgets.QHBoxLayout(self)
+        self.gridLayout = QtWidgets.QGridLayout(self)
 
         self.filename_textbox = QtWidgets.QLineEdit()
         self.button_save_points = QtWidgets.QPushButton()
         self.button_load_points = QtWidgets.QPushButton()
         # TODO: saving files as dataframes
+        self.sim_textbox = QtWidgets.QLineEdit()
+        self.button_load_points_sim = QtWidgets.QPushButton()
 
         self.button_save_points.setText("Save points as .nb")
         self.button_load_points.setText("Load points from .nb")
+        self.sim_textbox.setText("Farfield_w_band")
+        self.button_load_points_sim.setText("Load simulation data")
 
-        self.horizontalLayout.addWidget(self.filename_textbox)
-        self.horizontalLayout.addWidget(self.button_save_points)
-        self.horizontalLayout.addWidget(self.button_load_points)
+        self.gridLayout.addWidget(self.filename_textbox,0,0,1,1)
+        self.gridLayout.addWidget(self.button_save_points,0,1,1,1)
+        self.gridLayout.addWidget(self.button_load_points,0,2,1,1)
+        self.gridLayout.addWidget(self.sim_textbox,1 , 0, 1, 1)
+        self.gridLayout.addWidget(self.button_load_points_sim, 1, 2, 1, 1)
 
 class FeedbackWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, type = "XYZ scan"):
@@ -937,6 +943,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.configs = Config("aaa.toml")
         self.setupUi(self)
         self.vna_connected = False
+        self.sim_data_available = False
         self.vna_parameters_widget.setEnabled(False)
         self.vna_plot_w.setEnabled(False)
 
@@ -992,6 +999,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.file_widget.button_save_points.clicked.connect(lambda: self.save_data_file(self.file_widget.filename_textbox.text()))
         self.file_widget.button_load_points.clicked.connect(lambda: self.load_data_file(self.file_widget.filename_textbox.text()))
+        self.file_widget.button_load_points_sim.clicked.connect(self.load_sim_data_file)
 
         self.run_on_robot = False
         self.robot_start_widget.simulate_pushButton.clicked.connect(self.run_program_in_sim)
@@ -1290,9 +1298,16 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             self.data = np.load(f"{filename}.npy")
 
+            # self.data[:, 1::2] = self.data[::-1, 1::2]
+            # self.data[:,::2] = np.roll(self.data[:,::2],1,axis=0)
+            # self.data[:, 1::2] = np.roll(self.data[:, 1::2], -1, axis=0)
+            # print(self.data[:,:,0,np.argmin(abs(temp_list[3]-91.0))])
+            # np.savetxt("slice.csv",self.data[:, :, 0, np.argmin(abs(temp_list[3] - 91.0))])
+
             # self.data = sp.fft.fftshift(sp.fft.fft(self.data, axis=3),axes=3)
             temp_list = pickle.load(open(f"{filename}.pkl","rb"))
             print(temp_list)
+
             self.scan_plot_w.checkbox_fft.setChecked(False)
             self.scan_coords = temp_list[:-1]
             self.freq_arr = np.array(temp_list[-1])
@@ -1313,6 +1328,35 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scan_plot_w.checkbox_fft.setEnabled(True)
         except FileNotFoundError as err:
             print(err)
+
+    def load_sim_data_file(self,folder="Farfield_w_band"):
+        path = r"C:\Users\giguv\Desktop\skuggsja-scan\\"
+        folder = self.file_widget.sim_textbox.text()
+        files = glob.glob(path + folder + "/" + "*].txt")
+        if len(files):
+            self.sim_data_available = True
+            files.sort(key=lambda x: float(x.split(" ")[1].split("=")[1][:-1]))
+            self.sim_freq_list = [float(file.split(" ")[1].split("=")[1][:-1]) for file in files]
+            self.sim_interp_list = []
+            for file in files:
+                farfield = np.loadtxt(file, unpack=1, skiprows=2)
+                azimuth = np.rad2deg(np.arctan(np.cos(np.deg2rad(farfield[1])) * np.tan(np.deg2rad(farfield[0]))))
+                elevation = np.rad2deg(np.arcsin(np.sin(np.deg2rad(farfield[1])) * np.sin(np.deg2rad(farfield[0]))))
+                # azimuth = farfield[0]+90
+                # elevation = farfield[1]
+                data_mag = farfield[5]
+                data_im = farfield[6]
+                f_ind = np.argwhere((abs(farfield[0]) < 90) & (abs(farfield[1] < 90)))
+                triang = mtri.Triangulation(azimuth[f_ind][:, 0], elevation[f_ind][:, 0])
+                interp_cubic_geom_mag = mtri.CubicTriInterpolator(triang, data_mag[f_ind][:, 0], kind='geom')
+                interp_cubic_geom_im = mtri.CubicTriInterpolator(triang, data_im[f_ind][:, 0], kind='geom')
+                interp_cubic_geom = (lambda x,y,mag=interp_cubic_geom_mag,im=interp_cubic_geom_im:mag(x,y) * np.exp(np.deg2rad(im(x,y)) *1j))
+                self.sim_interp_list.append(interp_cubic_geom)
+
+            self.slice_plot_initialize()
+
+
+
 
     def run_program_on_robot(self):
         self.run_on_robot = True
@@ -1646,7 +1690,8 @@ class MainWindow(QtWidgets.QMainWindow):
             data = self.data_fft
         else:
             data = self.data
-        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data)
+        format = self.scan_plot_w.plot_format_combobox.currentText()
+        formatted_data = self.scan_plot_w.plot_formats[format](data)
         self.scan_plot_w.ax_scan.clear()
         if hasattr(self,"meshplot"):
             self.meshplot = None
@@ -1656,10 +1701,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_plot_w.ax_scan.set_xlabel(f"Position along ${slice_plane[0].lower()}$, mm")
         self.scan_plot_w.ax_scan.set_ylabel(f"Position along ${slice_plane[1].lower()}$, mm")
         if self.scan_type_combobox.currentText() == "Spherical scan":
-            self.scan_plot_w.ax_scan.set_xlabel(f"Position along $\\phi$, degrees")
-            self.scan_plot_w.ax_scan.set_ylabel(f"Position along $\\theta$, degrees")
+            self.scan_plot_w.ax_scan.set_xlabel(f"Azimuth, degrees")
+            self.scan_plot_w.ax_scan.set_ylabel(f"Elevation, degrees")
         scan_slice = self.return_scan_slice(slice_plane,self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
-        self.meshplot = self.scan_plot_w.ax_scan.imshow(formatted_data[scan_slice].T,origin ="lower")
+        self.meshplot = self.scan_plot_w.ax_scan.imshow(formatted_data[scan_slice].T, origin="lower",cmap = ("viridis" if format != "Phase" else "hsv"))
+        # self.meshplot = self.scan_plot_w.ax_scan.imshow(formatted_data[scan_slice].T,origin ="lower",cmap="jet",vmax=0,vmin=-60)
         d1 = (coord_1.max()-coord_1.min())/(len(coord_1)-1)/2
         d2 = (coord_2.max() - coord_2.min()) / (len(coord_2)-1)/2
         extent = [coord_1.min()-d1,coord_1.max()+d1,coord_2.min()-d2,coord_2.max()+d2]
@@ -1774,9 +1820,19 @@ class MainWindow(QtWidgets.QMainWindow):
             coords = np.linspace(coords.min(),coords.max(),coords.size*self.fft_padding)
         else:
             data = self.data
-        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data[scan_slice])
-        self.sliceplot, = self.slice_plot_w.ax_slice.plot(coords,formatted_data[scan_slice_2])
+        format_function = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()]
+        formatted_data = format_function(data[scan_slice])
+        self.sliceplot, = self.slice_plot_w.ax_slice.plot(coords,formatted_data[scan_slice_2],label = "Experimental")
         self.slice_plot_w.ax_slice.set_xlim(coords.min(),coords.max())
+        if self.sim_data_available:
+            self.interpolator = self.sim_interp_list[np.argmin(abs(self.sim_freq_list-self.freq_arr[scan_slice[3]]))]
+            #TODO: fix for cartesian
+            self.int_grid = np.meshgrid(self.scan_coords[1],self.scan_coords[0])
+            data_sim = self.interpolator(self.int_grid[0][scan_slice_2],self.int_grid[1][scan_slice_2])
+            self.int_norm = np.abs(self.interpolator(self.int_grid[1],self.int_grid[0])).max()
+            data_sim = data_sim*np.abs(data[scan_slice]).max()/self.int_norm
+            self.int_sliceplot, = self.slice_plot_w.ax_slice.plot(coords,format_function(data_sim),label = "Simulated")
+        self.slice_plot_w.ax_slice.legend()
 
 
     def slice_plot_update(self):
@@ -1789,10 +1845,15 @@ class MainWindow(QtWidgets.QMainWindow):
             data = self.data_fft
         else:
             data = self.data
-        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](
-            data[scan_slice])
+        format_function = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()]
+        formatted_data = format_function(data[scan_slice])
         if len(formatted_data[scan_slice_2]) == len(self.sliceplot.get_ydata()):
             self.sliceplot.set_ydata(formatted_data[scan_slice_2])
+            if self.sim_data_available:
+                self.interpolator = self.sim_interp_list[
+                    np.argmin(abs(self.sim_freq_list - self.freq_arr[scan_slice[3]]))]
+                self.int_norm = np.abs(self.interpolator(self.int_grid[1], self.int_grid[0])).max()
+                self.int_sliceplot.set_ydata(format_function(self.interpolator(self.int_grid[1][scan_slice_2],self.int_grid[0][scan_slice_2])*(np.abs(data[scan_slice]).max()/self.int_norm)))
             try:
                 self.slice_plot_w.ax_slice.set_ylim(np.nanmin(formatted_data), np.nanmax(formatted_data))
             except ValueError:
