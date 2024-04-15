@@ -20,6 +20,7 @@ import warnings
 import pickle
 import glob
 import matplotlib.tri as mtri
+import scipy.constants as const
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 SAVE_ON_SCAN_END = False
@@ -128,6 +129,24 @@ class RobotMovementObject(QtCore.QObject):
         # self.monitor.kill_signal.connect(self.monitor_thread.quit)
         self.settle_time = 0
         self.acquisition_time = 0
+        self.E_plane = 0
+
+    @QtCore.pyqtSlot(bool)
+    def set_plane(self,E_plane = False):
+        if E_plane:
+            self.rdk_instance.robot.setPoseTool(self.rdk_instance.default_pose_tool*robomath.rotz(np.pi/2))
+            self.E_plane = 1
+        else:
+            self.rdk_instance.robot.setPoseTool(self.rdk_instance.default_pose_tool)
+            self.E_plane = 0
+
+    @QtCore.pyqtSlot(float,float,float,float)
+    def rotate_pose_tool(self,phi,az,el,z_phc):
+        if self.E_plane:
+            pose_tool = self.rdk_instance.default_pose_tool*robomath.rotz(np.pi/2)
+        else:
+            pose_tool = self.rdk_instance.default_pose_tool
+        self.rdk_instance.robot.setPoseTool(pose_tool.Offset(0,0,z_phc)*robomath.rotz(np.deg2rad(phi))*robomath.roty(np.deg2rad(az))*robomath.rotx(np.deg2rad(el)))
 
     @QtCore.pyqtSlot(tuple,tuple,tuple)
     @movement_wrapper_robot_internal
@@ -422,6 +441,7 @@ class RobotControlsWidget(QtWidgets.QWidget):
         super(RobotControlsWidget, self).__init__(parent)
         self.VLayout = QtWidgets.QVBoxLayout(self)
         gridLayout = QtWidgets.QGridLayout()
+        gridLayout2 = QtWidgets.QGridLayout()
         self.stop_pushButton = RobotStopButton()
 
         self.man_step_label = QtWidgets.QLabel()
@@ -431,11 +451,22 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.robot_joint_accel_label = QtWidgets.QLabel()
         self.robot_joint_accel_lineEdit = QtWidgets.QLineEdit()
         self.position_reset_pushButton = QtWidgets.QPushButton()
-        self.position_reset_cross_pushButton = QtWidgets.QPushButton()
+        self.set_H_plane_pushButton = QtWidgets.QPushButton()
+        self.set_E_plane_pushButton = QtWidgets.QPushButton()
+        self.set_tool_rotation_pushButton = QtWidgets.QPushButton()
         self.set_scan_init_pushButton = QtWidgets.QPushButton()
         self.set_robot_speed_pushButton = QtWidgets.QPushButton()
         self.robot_joint_speed_lineEdit.setMaximumWidth(40)
         self.robot_joint_accel_lineEdit.setMaximumWidth(40)
+
+        self.tool_phi_label = QtWidgets.QLabel()
+        self.tool_phi_lineEdit = QtWidgets.QLineEdit()
+        self.tool_az_label = QtWidgets.QLabel()
+        self.tool_az_lineEdit = QtWidgets.QLineEdit()
+        self.tool_el_label = QtWidgets.QLabel()
+        self.tool_el_lineEdit = QtWidgets.QLineEdit()
+        self.tool_z_label = QtWidgets.QLabel()
+        self.tool_z_lineEdit = QtWidgets.QLineEdit()
 
         self.man_step_label.setText("Manual movement step")
         self.man_step_lineEdit.setText("5")
@@ -444,9 +475,19 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.robot_joint_speed_lineEdit.setText("5")
         self.robot_joint_accel_lineEdit.setText("5")
         self.position_reset_pushButton.setText("Reset robot position")
-        self.position_reset_cross_pushButton.setText("Reset robot position (cross)")
+        self.set_H_plane_pushButton.setText("Set H plane")
+        self.set_E_plane_pushButton.setText("Set E plane")
+        self.set_tool_rotation_pushButton.setText("Set tool rotation")
         self.set_scan_init_pushButton.setText("Set new scan origin point")
         self.set_robot_speed_pushButton.setText("Set robot speed")
+        self.tool_phi_label.setText("phi")
+        self.tool_az_label.setText("az")
+        self.tool_el_label.setText("el")
+        self.tool_z_label.setText("z phase center")
+        self.tool_phi_lineEdit.setText("0")
+        self.tool_az_lineEdit.setText("0")
+        self.tool_el_lineEdit.setText("0")
+        self.tool_z_lineEdit.setText("0")
 
         gridLayout.addWidget(self.man_step_label,0,0,1,1)
         gridLayout.addWidget(self.man_step_lineEdit, 0, 1, 1, 1)
@@ -458,7 +499,20 @@ class RobotControlsWidget(QtWidgets.QWidget):
         gridLayout.addWidget(self.position_reset_pushButton, 1, 0, 1, 1)
         # gridLayout.addWidget(self.position_reset_cross_pushButton, 2, 0, 1, 1)
         gridLayout.addWidget(self.set_scan_init_pushButton, 1, 1, 1, 1)
+        gridLayout2.addWidget(self.set_H_plane_pushButton,0,0,1,1)
+        gridLayout2.addWidget(self.set_E_plane_pushButton, 0, 1, 1, 1)
+        gridLayout2.addWidget(self.set_tool_rotation_pushButton, 0, 2, 1, 1)
+        gridLayout2.addWidget(self.tool_phi_label, 0, 3, 1, 1)
+        gridLayout2.addWidget(self.tool_phi_lineEdit, 0, 4, 1, 1)
+        gridLayout2.addWidget(self.tool_az_label, 0, 5, 1, 1)
+        gridLayout2.addWidget(self.tool_az_lineEdit, 0, 6, 1, 1)
+        gridLayout2.addWidget(self.tool_el_label, 0, 7, 1, 1)
+        gridLayout2.addWidget(self.tool_el_lineEdit, 0, 8, 1, 1)
+        gridLayout2.addWidget(self.tool_z_label, 0, 9, 1, 1)
+        gridLayout2.addWidget(self.tool_z_lineEdit, 0, 10, 1, 1)
+
         self.VLayout.addLayout(gridLayout)
+        self.VLayout.addLayout(gridLayout2)
         self.VLayout.addWidget(self.stop_pushButton)
 
         size_policy = QtWidgets.QSizePolicy()
@@ -873,6 +927,11 @@ class ScanPlotWidget(PlotWidget):
         self.plot_format_combobox = QtWidgets.QComboBox()
         self.slice_direction_combobox = QtWidgets.QComboBox()
         self.checkbox_fft = QtWidgets.QRadioButton()
+        self.checkbox_backpropagation = QtWidgets.QCheckBox()
+        self.backpropagation_distance_label = QtWidgets.QLabel()
+        self.backpropagation_distance_textfield = QtWidgets.QLineEdit()
+        self.backpropagation_distance_slider = QtWidgets.QSlider()
+        self.backpropagation_distance_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
         self.coordinate_label = QtWidgets.QLabel()
         self.coordinate_textfield = QtWidgets.QLineEdit()
         self.coordinate_slider = QtWidgets.QSlider()
@@ -884,6 +943,9 @@ class ScanPlotWidget(PlotWidget):
 
         self.checkbox_fft.setText("2D XY FFT")
         self.checkbox_fft.setEnabled(False)
+        self.checkbox_backpropagation.setText("Backpropagation")
+        # self.checkbox_backpropagation.setEnabled(False)
+        self.backpropagation_distance_label.setText("Distance (mm)")
         self.coordinate_label.setText("Change coordinate to (mm):")
         self.frequency_label.setText("Change frequency to (GHz):")
         self.plot_format_combobox.addItems(self.plot_formats.keys())
@@ -900,7 +962,16 @@ class ScanPlotWidget(PlotWidget):
         self.gridLayout.addWidget(self.frequency_textfield, 3, 1, 1, 1)
         self.gridLayout.addWidget(self.frequency_slider, 3, 2, 1, 1)
 
+        self.backpropagation_distance_slider.setMaximum(3000)
+        self.backpropagation_distance_slider.valueChanged.connect(lambda: self.backpropagation_distance_textfield.setText(str(self.backpropagation_distance_slider.value())))
+        fft_hLayout = QtWidgets.QHBoxLayout()
+        fft_hLayout.addWidget(self.checkbox_backpropagation)
+        fft_hLayout.addWidget(self.backpropagation_distance_label)
+        fft_hLayout.addWidget(self.backpropagation_distance_textfield)
+        fft_hLayout.addWidget(self.backpropagation_distance_slider)
+
         self.VLayout.addLayout(self.gridLayout)
+        self.VLayout.addLayout(fft_hLayout)
 
         self.ax_scan = self.figure.add_subplot(111)
 
@@ -938,6 +1009,8 @@ class MainWindow(QtWidgets.QMainWindow):
     send_robot_to_init = QtCore.pyqtSignal()
     send_settle_time = QtCore.pyqtSignal(float)
     send_acquisition_time = QtCore.pyqtSignal(float)
+    send_tool_plane = QtCore.pyqtSignal(bool)
+    send_tool_rotation = QtCore.pyqtSignal(float,float,float,float)
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
         self.configs = Config("aaa.toml")
@@ -991,9 +1064,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.coord_update_timer.timeout.connect(self.coord_update_func)
 
         self.robot_controls_widget.position_reset_pushButton.clicked.connect(self.position_reset_button_clicked)
-        self.robot_controls_widget.position_reset_cross_pushButton.clicked.connect(self.position_reset_cross_button_clicked)
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
         self.robot_controls_widget.set_robot_speed_pushButton.clicked.connect(self.set_robot_speed)
+
+        self.robot_controls_widget.set_E_plane_pushButton.clicked.connect(lambda: self.send_tool_plane.emit(1))
+        self.robot_controls_widget.set_H_plane_pushButton.clicked.connect(lambda: self.send_tool_plane.emit(0))
+        self.robot_controls_widget.set_tool_rotation_pushButton.clicked.connect(self.set_tool_rotation)
 
         self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
 
@@ -1012,7 +1088,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
         self.scan_plot_w.plot_format_combobox.currentTextChanged.connect(self.scan_plot_update)
         self.scan_plot_w.checkbox_fft.clicked.connect(self.scan_plot_update)
+        self.scan_plot_w.checkbox_backpropagation.clicked.connect(self.scan_plot_update)
         self.scan_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed)
+        self.scan_plot_w.backpropagation_distance_slider.valueChanged.connect(self.scan_plot_update)
 
         self.slice_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
         self.slice_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed_slice)
@@ -1075,21 +1153,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def position_reset_button_clicked(self):
         self.send_robot_to_init.emit()
 
-
-    @movement_wrapper
-    def position_reset_cross_button_clicked(self):
-        self.send_robot_to_initial("V")
-
-    # @synchronized
-    def send_robot_to_initial(self, pol ="H"):
-        if pol == "H":
-            self.robot_rdk.robot.MoveJ(self.robot_rdk.target_init.Joints())
-            self.robot_rdk.target_rel.setPose(self.robot_rdk.target_init.Pose())
-        elif pol == "V":
-            self.robot_rdk.robot.MoveJ(self.robot_rdk.target_init_cross.Joints())
-            self.robot_rdk.target_rel.setPose(self.robot_rdk.target_init_cross.Pose())
-        else:
-            pass
+    def set_tool_rotation(self):
+        try:
+            phi,az,el,z_phc = [float(x.text()) for x in [self.robot_controls_widget.tool_phi_lineEdit,
+                                                   self.robot_controls_widget.tool_az_lineEdit,
+                                                   self.robot_controls_widget.tool_el_lineEdit,
+                                                         self.robot_controls_widget.tool_z_lineEdit]]
+            self.send_tool_rotation.emit(phi,az,el,z_phc)
+        except ValueError:
+            print("Value is not a float")
 
     def set_scan_init_button_clicked(self):
         self.scan_init = self.robot_rdk.set_scan_initial()
@@ -1311,21 +1383,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scan_plot_w.checkbox_fft.setChecked(False)
             self.scan_coords = temp_list[:-1]
             self.freq_arr = np.array(temp_list[-1])
+            window1d1 = sp.signal.windows.hamming(self.data.shape[0])
+            window1d2 = sp.signal.windows.hamming(self.data.shape[1])
+            # window2d = np.moveaxis(np.tile(np.moveaxis(np.tile(np.sqrt(np.outer(window1d1, window1d2)),(1,1,self.data.shape[2])),0,-1),(1,1,1,self.data.shape[3])),0,-1)
+            window2d = np.sqrt(np.outer(window1d1, window1d2))
+            data_temp = np.einsum("ij,ijkm->ijkm", window2d, self.data)
+            data_temp = self.data
+            self.data_fft = sp.fft.fftshift(
+                sp.fft.fft2(data_temp, s=(self.data.shape[0] * self.fft_padding, self.data.shape[1] * self.fft_padding), axes=(0, 1)),
+                axes=(0, 1))
+            self.scan_plot_w.checkbox_fft.setEnabled(True)
             self.scan_plot_initialize()
             self.slice_plot_initialize()
             self.update_coord_slider()
             self.scan_plot_w.frequency_slider.setRange(0, len(self.freq_arr) - 1)
             self.scan_plot_w.setEnabled(True)
             self.slice_plot_w.setEnabled(True)
-            window1d1 = sp.signal.windows.hamming(self.data.shape[0])
-            window1d2 = sp.signal.windows.hamming(self.data.shape[1])
-            # window2d = np.moveaxis(np.tile(np.moveaxis(np.tile(np.sqrt(np.outer(window1d1, window1d2)),(1,1,self.data.shape[2])),0,-1),(1,1,1,self.data.shape[3])),0,-1)
-            window2d = np.sqrt(np.outer(window1d1, window1d2))
-            data_temp = np.einsum("ij,ijkm->ijkm", window2d, self.data)
-            self.data_fft = sp.fft.fftshift(
-                sp.fft.fft2(data_temp, s=(self.data.shape[0] * self.fft_padding, self.data.shape[1] * self.fft_padding), axes=(0, 1)),
-                axes=(0, 1))
-            self.scan_plot_w.checkbox_fft.setEnabled(True)
         except FileNotFoundError as err:
             print(err)
 
@@ -1431,6 +1504,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.send_movement_coords_abs.connect(self.worker.move_robot_to_coordinate)
         self.send_robot_to_scan_init.connect(self.worker.move_robot_to_init_scan)
         self.send_robot_to_init.connect(self.worker.move_robot_to_init)
+        self.send_tool_plane.connect(self.worker.set_plane)
+        self.send_tool_rotation.connect(self.worker.rotate_pose_tool)
         self.worker.arrived_at_point.connect(self.scan_data_add_point)
         self.worker.began_movement.connect(self.robot_movement_started)
         self.worker.finished_movement.connect(self.robot_movement_finished)
@@ -1737,13 +1812,26 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def scan_plot_update(self):
         # formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data)
-        if self.scan_plot_w.checkbox_fft.isChecked():
+        if (self.scan_plot_w.checkbox_fft.isChecked()) or (self.scan_plot_w.checkbox_backpropagation.isChecked()):
             data = self.data_fft
         else:
             data = self.data
-        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data)
         scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
-        self.meshplot.set_data(formatted_data[scan_slice].T)
+        if self.scan_plot_w.checkbox_backpropagation.isChecked():
+            k0 = self.freq_arr[self.scan_plot_w.frequency_slider.value()] * 1e9 * 2 * np.pi / const.speed_of_light
+            kx = 2*np.pi*self.scan_coords[0]/(self.scan_coords[0].size)
+            ky = 2*np.pi*self.scan_coords[1]/(self.scan_coords[1].size)
+            kx, ky = np.meshgrid(kx,ky)
+            kz = np.sqrt(k0**2-kx**2-ky**2)
+            data_slice = data[scan_slice] * np.exp(1j * kz.T * self.scan_plot_w.backpropagation_distance_slider.value())\
+                         # *\
+                         # np.exp(-1j * (phase_x.T+phase_y.T))
+            if not self.scan_plot_w.checkbox_fft.isChecked():
+                data_slice = sp.fft.ifft2(sp.fft.fftshift(data_slice))
+        else:
+            data_slice = data[scan_slice]
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data_slice)
+        self.meshplot.set_data(formatted_data.T)
         self.meshplot.autoscale()
         self.scan_plot_w.canvas.draw()
 

@@ -29,6 +29,7 @@ class RDK_KUKA(Robolink):
             self.AddTarget('Target scan initial',self.robot.Parent())
             self.AddTarget('Target scan',self.robot.Parent())
 
+        self.default_pose_tool = self.robot.PoseTool()
         self.tool = self.ItemUserPick("w_band_mount", ITEM_TYPE_TOOL)
         self.setCollisionActivePair(COLLISION_OFF, self.tool, self.robot.ObjectLink(6))
         self.target_init = self.Item('Target initial')
