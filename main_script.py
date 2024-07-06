@@ -185,22 +185,27 @@ class RobotMovementObject(QtCore.QObject):
             self.arrived_at_point.emit(index_tuple, dir_tuple)
             self.finished_movement.emit()
 
-    def moveJointsSafe(self, new_pose):
+    def moveJointsSafe(self, new_pose, lin = False):
         if len(self.rdk_instance.robot.SolveIK(new_pose, tool=self.rdk_instance.robot.PoseTool()).tolist()) == 6:
             config = np.squeeze(
                 self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints())[:3]).tolist()
             joints = robolinkutils.SolveIK_Conf(self.rdk_instance.robot, new_pose,
                                                 toolpose=self.rdk_instance.robot.PoseTool(), joint_config=config)
-            print(self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints()))
+            # print(self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints()))
             # self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
             if len(joints) > 0:
                 diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.target_init.Joints())[:, :6],
                                                           (len(joints), 1))
-                print(diff)
-                print(np.linalg.norm(diff, axis=1))
-                print(diff[np.linalg.norm(diff, axis=1).argmin()])
+                print('difference ',diff)
+                print('difference norm ', np.linalg.norm(diff, axis=1))
+                # print(diff[np.linalg.norm(diff, axis=1).argmin()])
                 best_config = diff[np.linalg.norm(diff, axis=1).argmin()]
-                self.rdk_instance.robot.MoveJ(joints[np.linalg.norm(diff, axis=1).argmin()])
+                print('joints ', joints)
+                print('best ',best_config)
+                if lin:
+                    self.rdk_instance.robot.MoveL(joints[np.linalg.norm(diff, axis=1).argmin()])
+                else:
+                    self.rdk_instance.robot.MoveJ(joints[np.linalg.norm(diff, axis=1).argmin()])
             else:
                 print("No suitable configuration found")
         else:
@@ -962,7 +967,8 @@ class ScanPlotWidget(PlotWidget):
         self.gridLayout.addWidget(self.frequency_textfield, 3, 1, 1, 1)
         self.gridLayout.addWidget(self.frequency_slider, 3, 2, 1, 1)
 
-        self.backpropagation_distance_slider.setMaximum(3000)
+        self.backpropagation_distance_slider.setMaximum(2500)
+        # self.backpropagation_distance_slider.setMinimum(-500)
         self.backpropagation_distance_slider.valueChanged.connect(lambda: self.backpropagation_distance_textfield.setText(str(self.backpropagation_distance_slider.value())))
         fft_hLayout = QtWidgets.QHBoxLayout()
         fft_hLayout.addWidget(self.checkbox_backpropagation)
@@ -1383,8 +1389,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scan_plot_w.checkbox_fft.setChecked(False)
             self.scan_coords = temp_list[:-1]
             self.freq_arr = np.array(temp_list[-1])
-            window1d1 = sp.signal.windows.hamming(self.data.shape[0])
-            window1d2 = sp.signal.windows.hamming(self.data.shape[1])
+            window = sp.signal.windows.hamming
+            window1d1 = window(self.data.shape[0])
+            window1d2 = window(self.data.shape[1])
             # window2d = np.moveaxis(np.tile(np.moveaxis(np.tile(np.sqrt(np.outer(window1d1, window1d2)),(1,1,self.data.shape[2])),0,-1),(1,1,1,self.data.shape[3])),0,-1)
             window2d = np.sqrt(np.outer(window1d1, window1d2))
             data_temp = np.einsum("ij,ijkm->ijkm", window2d, self.data)
@@ -1392,6 +1399,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.data_fft = sp.fft.fftshift(
                 sp.fft.fft2(data_temp, s=(self.data.shape[0] * self.fft_padding, self.data.shape[1] * self.fft_padding), axes=(0, 1)),
                 axes=(0, 1))
+            # self.data_fft = sp.fft.fftshift(
+            #     sp.fft.fft2(data_temp, s=(1024, 1024), axes=(0, 1)),
+            #     axes=(0, 1))
             self.scan_plot_w.checkbox_fft.setEnabled(True)
             self.scan_plot_initialize()
             self.slice_plot_initialize()
@@ -1784,6 +1794,7 @@ class MainWindow(QtWidgets.QMainWindow):
         d1 = (coord_1.max()-coord_1.min())/(len(coord_1)-1)/2
         d2 = (coord_2.max() - coord_2.min()) / (len(coord_2)-1)/2
         extent = [coord_1.min()-d1,coord_1.max()+d1,coord_2.min()-d2,coord_2.max()+d2]
+        self.scan_plot_extent = extent
         self.meshplot.set_extent(extent)
 
         self.scan_plot_w.hline = self.scan_plot_w.ax_scan.axhline(0, visible=1, color="k")
@@ -1817,21 +1828,47 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             data = self.data
         scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
+        k0 = self.freq_arr[self.scan_plot_w.frequency_slider.value()] * 1e9 * 2 * np.pi / const.speed_of_light
+        kx1 = 2*np.pi*self.scan_coords[0]*1e3/(self.scan_coords[0].size)/abs(self.scan_coords[0][1]-self.scan_coords[0][0])**2
+        ky1 = 2*np.pi*self.scan_coords[1]*1e3/(self.scan_coords[1].size)/abs(self.scan_coords[1][1]-self.scan_coords[1][0])**2
         if self.scan_plot_w.checkbox_backpropagation.isChecked():
-            k0 = self.freq_arr[self.scan_plot_w.frequency_slider.value()] * 1e9 * 2 * np.pi / const.speed_of_light
-            kx = 2*np.pi*self.scan_coords[0]/(self.scan_coords[0].size)
-            ky = 2*np.pi*self.scan_coords[1]/(self.scan_coords[1].size)
-            kx, ky = np.meshgrid(kx,ky)
-            kz = np.sqrt(k0**2-kx**2-ky**2)
-            data_slice = data[scan_slice] * np.exp(1j * kz.T * self.scan_plot_w.backpropagation_distance_slider.value())\
+            # kx = 2*np.pi*self.scan_coords[0]/(self.scan_coords[0].size)
+            # ky = 2*np.pi*self.scan_coords[1]/(self.scan_coords[1].size)
+            kx, ky = np.meshgrid(kx1,ky1)
+            # kz2= k0**2-kx**2-ky**2
+            # kz2[kz2<0] = 0
+            # kz = np.sqrt(kz2)
+            kz = np.emath.sqrt(k0**2-kx**2-ky**2)
+            data_slice = data[scan_slice] * np.exp(1j * kz * self.scan_plot_w.backpropagation_distance_slider.value()*1e-3).T\
                          # *\
                          # np.exp(-1j * (phase_x.T+phase_y.T))
             if not self.scan_plot_w.checkbox_fft.isChecked():
-                data_slice = sp.fft.ifft2(sp.fft.fftshift(data_slice))
+                data_slice = sp.fft.ifft2(sp.fft.ifftshift(data_slice))
         else:
             data_slice = data[scan_slice]
+        if self.scan_plot_w.checkbox_fft.isChecked():
+            if np.any(abs(kx1) > k0) or np.any(abs(ky1) > k0):
+                ang_x = np.degrees(np.arcsin((kx1%(k0*((kx1<0)*-2+1)))/k0))+90*np.sign(kx1)*(abs(kx1)//k0)
+                ang_y = np.degrees(np.arcsin((ky1%(k0*((ky1<0)*-2+1))) / k0)) + 90*np.sign(ky1)*(abs(ky1)//k0)
+            else:
+                ang_x = np.degrees(np.arcsin(kx1/k0))
+                ang_y = np.degrees(np.arcsin(ky1/k0))
+            d1 = (ang_x.max() - ang_x.min()) / (len(ang_x) - 1) / 2
+            d2 = (ang_y.max() - ang_y.min()) / (len(ang_y) - 1) / 2
+            extent = [ang_x.min() - d1, ang_x.max() + d1, ang_y.min() - d2, ang_y.max() + d2]
+            self.meshplot.set_extent(extent)
+        else:
+            self.meshplot.set_extent(self.scan_plot_extent)
         formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data_slice)
         self.meshplot.set_data(formatted_data.T)
+        title =  f" at {self.freq_arr[self.scan_plot_w.frequency_slider.value()]} GHz"
+        if (self.scan_plot_w.checkbox_fft.isChecked()):
+            title = self.scan_plot_w.plot_format_combobox.currentText()+ " of the fourier image" + title
+        else:
+            title = self.scan_plot_w.plot_format_combobox.currentText() + title
+            if (self.scan_plot_w.checkbox_backpropagation.isChecked()):
+                title += f" at {self.scan_plot_w.backpropagation_distance_slider.value()/1e3:.3f} m"
+        self.scan_plot_w.ax_scan.set_title(title)
         self.meshplot.autoscale()
         self.scan_plot_w.canvas.draw()
 
