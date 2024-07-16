@@ -24,7 +24,9 @@ import scipy.constants as const
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 SAVE_ON_SCAN_END = False
-
+scan_type_dict = {"XYZ scan":("X","Y","Z"),"Ludwig 2: AE":("Az","El","R"),
+              "Angular sweep":("Az","El","R"),"Ludwig 3":("θ","φ","R"),}
+scan_type_list = list(scan_type_dict.keys())
 def movement_wrapper(f, mute = False):
     @functools.wraps(f)
     def new_function(self, *args, **kw):
@@ -148,15 +150,38 @@ class RobotMovementObject(QtCore.QObject):
             pose_tool = self.rdk_instance.default_pose_tool
         self.rdk_instance.robot.setPoseTool(pose_tool.Offset(0,0,z_phc)*robomath.rotz(np.deg2rad(phi))*robomath.roty(np.deg2rad(az))*robomath.rotx(np.deg2rad(el)))
 
-    @QtCore.pyqtSlot(tuple,tuple,tuple)
+    @QtCore.pyqtSlot(tuple,tuple,tuple,dict)
     @movement_wrapper_robot_internal
     def move_robot_to_point_scan(self,coord_tuple=None, index_tuple=None,
-                                 dir_tuple=None):
+                                 dir_tuple=None, settings= {"scan_type": scan_type_list[0],"distance":1850}):
         if coord_tuple != None:
             self.began_movement.emit()
+            scan_type = settings["scan_type"]
+
             # coord_tuple, index_tuple, dir_tuple, settle_time
-            x, y, z = coord_tuple
-            new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+            if scan_type == scan_type_list[0]:
+                x, y, z = coord_tuple
+                new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+            if scan_type == scan_type_list[1] or scan_type == scan_type_list[2]:
+                azimuth, elevation, r = coord_tuple
+                distance = settings["distance"]
+                if scan_type == scan_type_list[2]:
+                    r = 0
+                    distance = 0
+                r = (distance-r)
+                new_pose = self.rdk_instance.target_scan_init.Pose() * \
+                           (robomath.eye().Offset(x=r * np.sin(np.deg2rad(azimuth)), y=r * np.sin(np.deg2rad(elevation)),
+                                                  z=distance - abs(r * np.cos(np.deg2rad(azimuth)) * np.cos(np.deg2rad(elevation))),
+                                                  rx=elevation, ry=-azimuth))
+            if scan_type == scan_type_list[3]:
+                theta, phi, r = coord_tuple
+                distance = settings["distance"]
+                r = (distance - r)
+                new_pose = self.rdk_instance.target_scan_init.Pose() * \
+                                       (robomath.eye().Offset(x=r * np.cos(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
+                                                          y=r * np.sin(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
+                                                          z=distance - abs(r * np.cos(np.deg2rad(theta))),
+                                                          rx=theta * np.sin(np.deg2rad(phi)), ry=-theta * np.cos(np.deg2rad(phi))))
             self.rdk_instance.target_scan.setPose(new_pose)
             self.moveJointsSafe(new_pose)
             # print(coord_tuple)
@@ -166,29 +191,42 @@ class RobotMovementObject(QtCore.QObject):
             self.arrived_at_point.emit(index_tuple, dir_tuple)
             self.finished_movement.emit()
 
-    @QtCore.pyqtSlot(tuple,tuple,tuple)
-    @movement_wrapper_robot_internal
-    def move_robot_to_point_scan_sph(self,coord_tuple=None, index_tuple=None,
-                                 dir_tuple=None):
-        if coord_tuple != None:
-            self.began_movement.emit()
-            # coord_tuple, index_tuple, dir_tuple, settle_time
-            phi, theta, r = coord_tuple
-            # new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
-            new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x =0, y =0, z=0,rx=theta,ry=phi))
-            self.rdk_instance.target_scan.setPose(new_pose)
-            self.moveJointsSafe(new_pose)
-            # print(coord_tuple)
-            time.sleep(self.settle_time)
-            self.ready_for_acquisition.emit()
-            time.sleep(self.acquisition_time)
-            self.arrived_at_point.emit(index_tuple, dir_tuple)
-            self.finished_movement.emit()
+    # @QtCore.pyqtSlot(tuple,tuple,tuple)
+    # @movement_wrapper_robot_internal
+    # def move_robot_to_point_scan_sph(self,coord_tuple=None, index_tuple=None,
+    #                              dir_tuple=None):
+    #     if coord_tuple != None:
+    #         self.began_movement.emit()
+    #         # coord_tuple, index_tuple, dir_tuple, settle_time
+    #         phi, theta, r = coord_tuple
+    #         theta, phi, r = coord_tuple
+    #         r = np.abs(r)
+    #         # new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+    #         new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x =0, y =0, z=0,rx=theta,ry=phi))
+    #         new_pose = self.rdk_instance.target_scan_init.Pose() * \
+    #                    (robomath.eye().Offset(x =r*np.sin(np.deg2rad(phi)), y =r*np.sin(np.deg2rad(theta)),
+    #                                           z=abs(r*np.cos(np.deg2rad(phi))*np.cos(np.deg2rad(theta))-r),
+    #                                           rx=theta,ry=phi))
+    #         new_pose = self.rdk_instance.target_scan_init.Pose() * \
+    #                    (robomath.eye().Offset(x=r * np.cos(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
+    #                                           y=r * np.sin(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
+    #                                           z=r - abs(r * np.cos(np.deg2rad(theta))),
+    #                                           rx=theta * np.sin(np.deg2rad(phi)), ry=-theta * np.cos(np.deg2rad(phi))))
+    #         self.rdk_instance.target_scan.setPose(new_pose)
+    #         self.moveJointsSafe(new_pose)
+    #         # print(coord_tuple)
+    #         time.sleep(self.settle_time)
+    #         self.ready_for_acquisition.emit()
+    #         time.sleep(self.acquisition_time)
+    #         self.arrived_at_point.emit(index_tuple, dir_tuple)
+    #         self.finished_movement.emit()
 
     def moveJointsSafe(self, new_pose, lin = False):
         if len(self.rdk_instance.robot.SolveIK(new_pose, tool=self.rdk_instance.robot.PoseTool()).tolist()) == 6:
             config = np.squeeze(
                 self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints())[:3]).tolist()
+            config[-1] = -1
+            # print(config)
             joints = robolinkutils.SolveIK_Conf(self.rdk_instance.robot, new_pose,
                                                 toolpose=self.rdk_instance.robot.PoseTool(), joint_config=config)
             # print(self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints()))
@@ -196,12 +234,29 @@ class RobotMovementObject(QtCore.QObject):
             if len(joints) > 0:
                 diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.target_init.Joints())[:, :6],
                                                           (len(joints), 1))
-                print('difference ',diff)
-                print('difference norm ', np.linalg.norm(diff, axis=1))
+                j6_diff = diff[:,-1]
+                j4_diff = diff[:, -3]
+            else:
+                print("No suitable configuration found")
+                return
+
+
+            if any(((j4_diff+j6_diff)<360) * (j6_diff<360)):
+
+                # diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.robot.Joints())[:, :6],
+                #                                           (len(joints), 1))
+                diff = diff[((j4_diff+j6_diff)<360) * (j6_diff<360)]
                 # print(diff[np.linalg.norm(diff, axis=1).argmin()])
                 best_config = diff[np.linalg.norm(diff, axis=1).argmin()]
-                print('joints ', joints)
-                print('best ',best_config)
+                # if len(np.unique(np.linalg.norm(diff, axis=1)))<len(np.linalg.norm(diff, axis=1)):
+                #     print("Several optimal poses might have been found")
+                    # diff = diff[np.sign(diff[:,-1]) == np.sign(diff[:,-3])]
+                # print('pose ', new_pose)
+                # print('difference ',diff)
+                # print('difference norm ', np.linalg.norm(diff, axis=1))
+                # print(np.linalg.norm(diff, axis=1).argmin())
+                # print('joints ', joints)
+                # print('best ',best_config)
                 if lin:
                     self.rdk_instance.robot.MoveL(joints[np.linalg.norm(diff, axis=1).argmin()])
                 else:
@@ -209,7 +264,7 @@ class RobotMovementObject(QtCore.QObject):
             else:
                 print("No suitable configuration found")
         else:
-            print("Target coordinates are inaccessible")
+            print("Target coordinates are inaccessible at ", robomath.Pose_2_KUKA(new_pose))
 
     @QtCore.pyqtSlot(tuple)
     @movement_wrapper_robot_internal
@@ -232,7 +287,7 @@ class RobotMovementObject(QtCore.QObject):
     @movement_wrapper_robot_internal
     def move_robot_to_init_scan(self):
         self.began_movement.emit()
-        self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan_init.Pose())
+        self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan_init)
         self.finished_movement.emit()
         self.finished_scan.emit()
 
@@ -526,7 +581,7 @@ class RobotControlsWidget(QtWidgets.QWidget):
         
 
 class ScanParametersWidget(QtWidgets.QWidget):
-    def __init__(self, parent=None, type = "XYZ scan"):
+    def __init__(self, parent=None, type = scan_type_list[0]):
         super(ScanParametersWidget, self).__init__(parent)
         self.scan_params_VLayout = QtWidgets.QVBoxLayout(self)
         self.scan_params_label = QtWidgets.QLabel()
@@ -570,6 +625,13 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.x3max_lineEdit = QtWidgets.QLineEdit()
         self.x3step_lineEdit = QtWidgets.QLineEdit()
 
+        self.extra1_label = QtWidgets.QLabel()
+        self.extra2_label = QtWidgets.QLabel()
+        self.extra3_label = QtWidgets.QLabel()
+        self.extra1_lineEdit = QtWidgets.QLineEdit()
+        self.extra2_lineEdit = QtWidgets.QLineEdit()
+        self.extra3_lineEdit = QtWidgets.QLineEdit()
+
         self.origin_params_w_list = [self.x0_label,self.x0_lineEdit,
                                      self.y0_label,self.y0_lineEdit,
                                      self.z0_label,self.z0_lineEdit]
@@ -585,6 +647,9 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.x3_params_w_list = [self.x3min_label, self.x3min_lineEdit,
                                      self.x3max_label, self.x3max_lineEdit,
                                      self.x3step_label, self.x3step_lineEdit]
+        self.extra_params_w_list = [self.extra1_label, self.extra1_lineEdit,
+                                 self.extra2_label, self.extra2_lineEdit,
+                                 self.extra3_label, self.extra3_lineEdit]
 
         self.params_rows = [self.origin_params_w_list,self.orientation_params_w_list,
                             self.x1_params_w_list,self.x2_params_w_list,self.x3_params_w_list]
@@ -593,6 +658,11 @@ class ScanParametersWidget(QtWidgets.QWidget):
         for ir, r in enumerate(self.params_rows):
             for iw, w in enumerate(r):
                 self.scan_params_gridLayout.addWidget(w, ir, iw, 1, 1)
+
+        for iw, w in enumerate(self.extra_params_w_list):
+            self.scan_params_gridLayout.addWidget(w, len(self.params_rows), iw, 1, 1)
+            w.setVisible(False)
+            w.sizePolicy().setRetainSizeWhenHidden(True)
 
         self.sttl_label = QtWidgets.QLabel()
         self.sttl_label.setText("Settling time, s")
@@ -644,37 +714,49 @@ class ScanParametersWidget(QtWidgets.QWidget):
 
         self.set_scan(type)
 
-    def set_scan(self,scan_type):
+    def set_scan(self,scan_type, distance = 1850):
         coordinates = ["X1", "X2", "X3"]
-        if scan_type == "XYZ scan":
-            for iw, w in enumerate(self.origin_params_w_list[::2]):
-                w.setText(["X0","Y0","Z0"][iw])
-                coordinates = ["X", "Y", "Z"]
-        if scan_type == "Spherical scan":
-            for iw, w in enumerate(self.origin_params_w_list[::2]):
-                w.setText(["Xc","Yc","Zc"][iw])
-                coordinates = ["R", "φ", "θ"]
+        if scan_type in scan_type_list:
+            coordinates = scan_type_dict[scan_type]
+
+        for iw, w in enumerate(self.origin_params_w_list[::2]):
+            w.setText(["X0", "Y0", "Z0"][iw])
 
         for iw, w in enumerate(self.params_rows[1][::2]):
             w.setText(["A0", "B0", "C0"][iw])
         
         for ir, row in enumerate(self.params_rows[2:]):
             for iw, w in enumerate(row[::2]):
-                w.setText(["{}min", "{}max", "{}step"][iw].format(coordinates[ir]))
+                w.setText(["{} min", "{} max", "{} steps"][iw].format(coordinates[ir]))
+                # if ir == 2 and scan_type in scan_type_list[1:4]:
+                #     w.setText(["Distance", "Δ{}", "{} steps"][iw].format(coordinates[ir]))
 
             for iw, w in enumerate(row[1::2]):
-                side = 10
+                side = 0
                 steps = 1
                 w.setText([f"{-side}", f"{side}", f"{steps}"][iw])
 
-        if scan_type == "Spherical scan":
-            self.params_rows[2][0].setText(coordinates[0])
-            for w in self.params_rows[2][2:]:
+            # if ir == 2 and scan_type in scan_type_list[1:4]:
+            #     row[1].setText(f"{distance}")
+
+        if scan_type in scan_type_list[1:4]:
+            row = self.extra_params_w_list
+            row[0].setText("Distance")
+            row[1].setText(f"{distance}")
+            row[0].setVisible(True)
+            row[1].setVisible(True)
+        else:
+            for w in self.extra_params_w_list:
+                w.setVisible(False)
+
+        if scan_type == scan_type_list[2]:
+            for w in self.params_rows[4][:]+self.extra_params_w_list:
                 w.setVisible(False)
                 w.sizePolicy().setRetainSizeWhenHidden(True)
         else:
-            for w in self.params_rows[2][2:]:
+            for w in self.params_rows[4][:]:
                 w.setVisible(True)
+
 
 class VNAParametersWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -786,7 +868,7 @@ class DataFileWidget(QtWidgets.QWidget):
         self.gridLayout.addWidget(self.button_load_points_sim, 1, 2, 1, 1)
 
 class FeedbackWidget(QtWidgets.QWidget):
-    def __init__(self, parent=None, type = "XYZ scan"):
+    def __init__(self, parent=None, type = scan_type_list[0]):
         super(FeedbackWidget, self).__init__(parent)
 
         self.VLayout = QtWidgets.QVBoxLayout(self)
@@ -848,12 +930,12 @@ class FeedbackWidget(QtWidgets.QWidget):
 
     def set_scan(self,scan_type):
         coordinates = [["X", "Y", "Z"],["A", "B", "C"]]
-        if scan_type == "Spherical scan":
-            coordinates.append(["R", "φ", "θ"])
+        if scan_type in scan_type_list:
+            coordinates.append(scan_type_dict[scan_type])
         else:
             coordinates.append(["X1", "X2", "X3"])
         rows = len(self.params_rows)
-        if scan_type == "XYZ scan":
+        if scan_type == scan_type_list[0]:
             rows -= 1
             for w in self.params_rows[2]:
                 w.setVisible(False)
@@ -1007,8 +1089,8 @@ class SlicePlotWidget(PlotWidget):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    send_movement_coords_scan = QtCore.pyqtSignal(tuple,tuple,tuple)
-    send_movement_coords_scan_sph = QtCore.pyqtSignal(tuple, tuple, tuple)
+    send_movement_coords_scan = QtCore.pyqtSignal(tuple,tuple,tuple,dict)
+    # send_movement_coords_scan_sph = QtCore.pyqtSignal(tuple, tuple, tuple)
     send_movement_coords_rel = QtCore.pyqtSignal(tuple)
     send_movement_coords_abs = QtCore.pyqtSignal(tuple)
     send_robot_to_scan_init = QtCore.pyqtSignal()
@@ -1183,36 +1265,43 @@ class MainWindow(QtWidgets.QMainWindow):
         # x = QtCore.QThread
         # x.start()
         self.scan_started = 1
-        if self.scan_type_combobox.currentText() == "XYZ scan":
-            self.scan_xyz()
-        elif self.scan_type_combobox.currentText() == "Spherical scan":
-            self.scan_sph()
-        else:
-            pass
+        self.scan_general()
+        # if self.scan_type_combobox.currentText() == scan_type_list[0]:
+        #     self.scan_xyz()
+        # elif self.scan_type_combobox.currentText() in scan_type_list[1:3]:
+        #     self.scan_sph()
+        # else:
+        #     pass
         # self.test_scan()
 
     @movement_wrapper
-    def scan_xyz(self):
+    def scan_general(self):
         try:
             points_axes = []
             shape = []
-
+            par_dict = {}
+            type = self.scan_type_combobox.currentText()
+            par_dict["scan_type"] = type
             self.update_estimated_scan_time()
-            for param in self.scan_parameters_widget.params_rows[2:]:
+            for ip, param in enumerate(self.scan_parameters_widget.params_rows[2:]):
                 min = float(param[1].text())
                 max = float(param[3].text())
+                # if ip == 2 and type in scan_type_list[1:3]:
+                #     max = min + float(param[3].text())
                 steps = int(param[5].text())
                 shape.append(steps)
-                points_axes.append(np.linspace(min,max,steps))
+                points_axes.append(np.linspace(min, max, steps))
             self.scan_coords = points_axes
-            self.delta=[]
+            self.delta = []
+            if type in scan_type_list[1:4]:
+                par_dict["distance"] = float(self.scan_parameters_widget.extra_params_w_list[1].text())
             if self.vna_connected:
                 shape.append(len(self.freq_arr))
-                self.instr.write_bool("INITiate:CONTinuous:ALL",False)
-            dir_x = 1
-            dir_y = 1
-            dir_z = 1
-            self.data = np.empty(shape, dtype= complex)
+                self.instr.write_bool("INITiate:CONTinuous:ALL", False)
+            dir_1 = 1
+            dir_2 = 1
+            dir_3 = 1
+            self.data = np.empty(shape, dtype=complex)
             # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
             self.data[:] = np.nan
             if self.vna_connected:
@@ -1228,73 +1317,128 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.vna_connected:
                 acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
                 self.send_acquisition_time.emit(acq_time)
-        # except ValueError:
-        #     print('Inputted value is invalid')
-        # try:
-            for iz, z in enumerate(points_axes[2][::dir_z]):
-                for iy, y in enumerate(points_axes[1][::dir_y]):
-                    for ix, x in enumerate(points_axes[0][::dir_x]):
-                        self.scanpoint_data.append({'c':(x,y,z),'i':(ix,iy,iz),'d':(dir_x,dir_y,dir_z)})
-                    dir_x *= -1
-                dir_y *= -1
-            self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'],self.scanpoint_data[0]['i'],self.scanpoint_data[0]['d'])
+            # except ValueError:
+            #     print('Inputted value is invalid')
+            # try:
+            for i3, x3 in enumerate(points_axes[2][::dir_3]):
+                for i2, x2 in enumerate(points_axes[1][::dir_2]):
+                    for i1, x1 in enumerate(points_axes[0][::dir_1]):
+                        c_tuple = (x1, x2, x3)
+                        if type in scan_type_list[1:3]:
+                            c_tuple = (x1, x2, x3)
+                        self.scanpoint_data.append({'c': (x1, x2, x3), 'i': (i1, i2, i3), 'd': (dir_1, dir_2, dir_3), "settings" : par_dict})
+                    dir_1 *= -1
+                dir_2 *= -1
+            self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'], self.scanpoint_data[0]['i'],
+                                                self.scanpoint_data[0]['d'], par_dict)
             # print(self.data)
         except ValueError as err:
             print('Inputted value is invalid\n' + str(err))
 
-    @movement_wrapper
-    def scan_sph(self):
-        try:
-            points_axes = []
-            shape = []
-            self.update_estimated_scan_time()
-            for param in self.scan_parameters_widget.params_rows[3:]:
-                min = float(param[1].text())
-                max = float(param[3].text())
-                steps = int(param[5].text())
-                shape.append(steps)
-                points_axes.append(np.linspace(min,max,steps))
-            points_axes.append(np.array((float(self.scan_parameters_widget.params_rows[2][1].text()),)))
-            shape.append(1)
-            self.scan_coords = points_axes
-            self.delta=[]
-            if self.vna_connected:
-                shape.append(len(self.freq_arr))
-                self.instr.write_bool("INITiate:CONTinuous:ALL",False)
-            dir_phi = 1
-            dir_theta = 1
-            dir_r = 1
-            self.data = np.empty(shape, dtype= complex)
-            # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
-            self.data[:] = np.nan
-            if self.vna_connected:
-                self.scan_plot_initialize()
-                self.slice_plot_initialize()
-                self.update_coord_slider()
-
-            settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
-            self.send_settle_time.emit(settle_time)
-            if self.vna_connected:
-                acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
-                self.send_acquisition_time.emit(acq_time)
-
-            self.scanpoint_data = []
-            self.scanpoint_index = 0
-        # except ValueError:
-        #     print('Inputted value is invalid')
-        # try:
-            for ir, r in enumerate(points_axes[2][::dir_r]):
-                for itheta, theta in enumerate(points_axes[1][::dir_theta]):
-                    for iphi, phi in enumerate(points_axes[0][::dir_phi]):
-                        self.scanpoint_data.append({'c':(phi,theta,r),'i':(iphi,itheta,ir),'d':(dir_phi,dir_theta,dir_r)})
-                        # self.send_movement_coords_scan_sph.emit((phi,theta,r),(iphi,itheta,ir),(dir_phi,dir_theta,dir_r))
-                    dir_phi *= -1
-                dir_theta *= -1
-            print(self.scanpoint_data)
-            self.send_movement_coords_scan_sph.emit(self.scanpoint_data[0]['c'],self.scanpoint_data[0]['i'],self.scanpoint_data[0]['d'])
-            # print(self.data)
-        except ValueError as err:
-            print('Inputted value is invalid\n' + str(err))
+    # @movement_wrapper
+    # def scan_xyz(self):
+    #     try:
+    #         points_axes = []
+    #         shape = []
+    #
+    #         self.update_estimated_scan_time()
+    #         for param in self.scan_parameters_widget.params_rows[2:]:
+    #             min = float(param[1].text())
+    #             max = float(param[3].text())
+    #             steps = int(param[5].text())
+    #             shape.append(steps)
+    #             points_axes.append(np.linspace(min,max,steps))
+    #         self.scan_coords = points_axes
+    #         self.delta=[]
+    #         if self.vna_connected:
+    #             shape.append(len(self.freq_arr))
+    #             self.instr.write_bool("INITiate:CONTinuous:ALL",False)
+    #         dir_x = 1
+    #         dir_y = 1
+    #         dir_z = 1
+    #         self.data = np.empty(shape, dtype= complex)
+    #         # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
+    #         self.data[:] = np.nan
+    #         if self.vna_connected:
+    #             self.scan_plot_initialize()
+    #             self.slice_plot_initialize()
+    #             self.update_coord_slider()
+    #
+    #         self.scanpoint_data = []
+    #         self.scanpoint_index = 0
+    #
+    #         settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
+    #         self.send_settle_time.emit(settle_time)
+    #         if self.vna_connected:
+    #             acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
+    #             self.send_acquisition_time.emit(acq_time)
+    #     # except ValueError:
+    #     #     print('Inputted value is invalid')
+    #     # try:
+    #         for iz, z in enumerate(points_axes[2][::dir_z]):
+    #             for iy, y in enumerate(points_axes[1][::dir_y]):
+    #                 for ix, x in enumerate(points_axes[0][::dir_x]):
+    #                     self.scanpoint_data.append({'c':(x,y,z),'i':(ix,iy,iz),'d':(dir_x,dir_y,dir_z)})
+    #                 dir_x *= -1
+    #             dir_y *= -1
+    #         self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'],self.scanpoint_data[0]['i'],self.scanpoint_data[0]['d'],scan_type_list[0])
+    #         # print(self.data)
+    #     except ValueError as err:
+    #         print('Inputted value is invalid\n' + str(err))
+    #
+    # @movement_wrapper
+    # def scan_sph(self):
+    #     try:
+    #         points_axes = []
+    #         shape = []
+    #         self.update_estimated_scan_time()
+    #         for param in self.scan_parameters_widget.params_rows[2:]:
+    #             min = float(param[1].text())
+    #             max = float(param[3].text())
+    #             steps = int(param[5].text())
+    #             shape.append(steps)
+    #             points_axes.append(np.linspace(min,max,steps))
+    #         points_axes.append(np.array((float(self.scan_parameters_widget.params_rows[2][1].text()),)))
+    #         shape.append(1)
+    #         self.scan_coords = points_axes
+    #         self.delta=[]
+    #         if self.vna_connected:
+    #             shape.append(len(self.freq_arr))
+    #             self.instr.write_bool("INITiate:CONTinuous:ALL",False)
+    #         dir_phi = 1
+    #         dir_theta = 1
+    #         dir_r = 1
+    #         self.data = np.empty(shape, dtype= complex)
+    #         # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
+    #         self.data[:] = np.nan
+    #         if self.vna_connected:
+    #             self.scan_plot_initialize()
+    #             self.slice_plot_initialize()
+    #             self.update_coord_slider()
+    #
+    #         settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
+    #         self.send_settle_time.emit(settle_time)
+    #         if self.vna_connected:
+    #             acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
+    #             self.send_acquisition_time.emit(acq_time)
+    #
+    #         self.scanpoint_data = []
+    #         self.scanpoint_index = 0
+    #     # except ValueError:
+    #     #     print('Inputted value is invalid')
+    #     # try:
+    #         for ir, r in enumerate(points_axes[2][::dir_r]):
+    #             for itheta, theta in enumerate(points_axes[1][::dir_theta]):
+    #                 for iphi, phi in enumerate(points_axes[0][::dir_phi]):
+    #                     self.scanpoint_data.append({'c':(phi,theta,r),'i':(iphi,itheta,ir),'d':(dir_phi,dir_theta,dir_r)})
+    #                     # self.send_movement_coords_scan_sph.emit((phi,theta,r),(iphi,itheta,ir),(dir_phi,dir_theta,dir_r))
+    #                 dir_phi *= -1
+    #             dir_theta *= -1
+    #         print(self.scanpoint_data)
+    #         self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'],self.scanpoint_data[0]['i'],self.scanpoint_data[0]['d'],scan_type_list[1])
+    #         # print(self.data)
+    #     except ValueError as err:
+    #         print('Inputted value is invalid\n' + str(err))
 
     @QtCore.pyqtSlot(tuple, tuple)
     def scan_data_add_point(self, index_tuple, dir_tuple):
@@ -1318,13 +1462,15 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.scanpoint_index +=1
             if self.scanpoint_index < index_total:
-                if self.scan_type_combobox.currentText() == "XYZ scan":
-                    movement_signal = self.send_movement_coords_scan
-                elif self.scan_type_combobox.currentText() == "Spherical scan":
-                    movement_signal = self.send_movement_coords_scan_sph
+                movement_signal = self.send_movement_coords_scan
+                # if self.scan_type_combobox.currentText() == "XYZ scan":
+                #     movement_signal = self.send_movement_coords_scan
+                # elif self.scan_type_combobox.currentText() == "Spherical scan":
+                #     movement_signal = self.send_movement_coords_scan_sph
                 movement_signal.emit(self.scanpoint_data[self.scanpoint_index]['c'],
                                                         self.scanpoint_data[self.scanpoint_index]['i'],
-                                                        self.scanpoint_data[self.scanpoint_index]['d'])
+                                                        self.scanpoint_data[self.scanpoint_index]['d'],
+                                                        self.scanpoint_data[self.scanpoint_index]['settings'])
             else:
                 self.send_robot_to_scan_init.emit()
         self.scan_parameters_widget.scan_progressbar.setMaximum(index_total)
@@ -1509,7 +1655,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def connect_robot_signals(self):
         self.send_movement_coords_scan.connect(self.worker.move_robot_to_point_scan)
-        self.send_movement_coords_scan_sph.connect(self.worker.move_robot_to_point_scan_sph)
         self.send_movement_coords_rel.connect(self.worker.move_robot_relative)
         self.send_movement_coords_abs.connect(self.worker.move_robot_to_coordinate)
         self.send_robot_to_scan_init.connect(self.worker.move_robot_to_init_scan)
@@ -2068,7 +2213,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.xyzS_VLayout.addWidget(self.scan_parameters_widget)
 
-        self.scan_types = ["XYZ scan","Spherical scan"]
+        self.scan_types = scan_type_list
         self.scan_type_combobox = QtWidgets.QComboBox(parent=self)
         self.scan_type_combobox.addItems(self.scan_types)
         self.scan_type_combobox.currentTextChanged.connect(lambda: update_scan_type(self.scan_type_combobox.currentText()))
