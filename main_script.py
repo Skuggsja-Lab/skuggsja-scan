@@ -18,6 +18,7 @@ import datetime
 import time
 import warnings
 import pickle
+import random
 import glob
 import matplotlib.tri as mtri
 import scipy.constants as const
@@ -691,6 +692,18 @@ class ScanParametersWidget(QtWidgets.QWidget):
         time_layout.addWidget(self.total_label)
         time_layout.addWidget(self.total_labelFramed)
 
+        self.random_label = QtWidgets.QLabel()
+        self.random_label.setText("Random:")
+        self.random_order_checkBox = QtWidgets.QCheckBox()
+        self.random_order_checkBox.setText("Point order")
+        self.random_approach_checkBox = QtWidgets.QCheckBox()
+        self.random_approach_checkBox.setText("Approach direction")
+        random_layout = QtWidgets.QHBoxLayout()
+        random_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        random_layout.addWidget(self.random_label)
+        random_layout.addWidget(self.random_order_checkBox)
+        random_layout.addWidget(self.random_approach_checkBox)
+
         self.scan_start_pushButton = QtWidgets.QPushButton()
         self.scan_start_pushButton.setText("Start scan")
 
@@ -706,6 +719,7 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.scan_params_VLayout.addWidget(self.scan_params_label)
         self.scan_params_VLayout.addLayout(self.scan_params_gridLayout)
         self.scan_params_VLayout.addLayout(time_layout)
+        self.scan_params_VLayout.addLayout(random_layout)
         self.scan_params_VLayout.addWidget(self.scan_start_pushButton)
         self.scan_params_VLayout.addLayout(progress_layout)
 
@@ -1329,8 +1343,15 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.scanpoint_data.append({'c': (x1, x2, x3), 'i': (i1, i2, i3), 'd': (dir_1, dir_2, dir_3), "settings" : par_dict})
                     dir_1 *= -1
                 dir_2 *= -1
+
+            par_dict["random_order"] = self.scan_parameters_widget.random_order_checkBox.isChecked()
+
+            if par_dict["random_order"] == True:
+                random.shuffle(self.scanpoint_data)
+
             self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'], self.scanpoint_data[0]['i'],
                                                 self.scanpoint_data[0]['d'], par_dict)
+            self.scan_parameters = par_dict
             # print(self.data)
         except ValueError as err:
             print('Inputted value is invalid\n' + str(err))
@@ -1452,14 +1473,20 @@ class MainWindow(QtWidgets.QMainWindow):
             iy * dir_y - (1 if dir_y < 0 else 0),
             iz* dir_z - (1 if dir_z < 0 else 0),:] = data_point
             self.scan_plot_update()
+        # else:
+        #     data_point = random.random()
+        #     self.freq_arr = np.array([1e9,2e9,3e9])
+        #     self.scan_plot_update()
         current_time = time.time_ns() / 1e9
         index_current = (index_tuple[2])*self.data.shape[0]*self.data.shape[1]+ \
                         (index_tuple[1]) * self.data.shape[0] + \
                         (index_tuple[0])
         index_total =np.prod(self.data.shape[:3])
-        if self.scanpoint_index != index_current:
+        if self.scanpoint_index != index_current and not self.scan_parameters["random_order"]:
             print("something went wrong, index mismatched")
         else:
+            if self.scan_parameters["random_order"]:
+                index_current = next(i for i, item in enumerate(self.scanpoint_data) if item["i"] == index_tuple)
             self.scanpoint_index +=1
             if self.scanpoint_index < index_total:
                 movement_signal = self.send_movement_coords_scan
@@ -1983,7 +2010,10 @@ class MainWindow(QtWidgets.QMainWindow):
             # kz2= k0**2-kx**2-ky**2
             # kz2[kz2<0] = 0
             # kz = np.sqrt(kz2)
-            kz = np.emath.sqrt(k0**2-kx**2-ky**2)
+            if self.scan_type_combobox.currentText() in scan_type_list[1:4]:
+                kz = np.emath.sqrt(k0**2)
+            else:
+                kz = np.emath.sqrt(k0**2-kx**2-ky**2)
             data_slice = data[scan_slice] * np.exp(1j * kz * self.scan_plot_w.backpropagation_distance_slider.value()*1e-3).T\
                          # *\
                          # np.exp(-1j * (phase_x.T+phase_y.T))
