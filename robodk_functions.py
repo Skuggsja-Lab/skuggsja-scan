@@ -14,7 +14,8 @@ class RDK_KUKA(Robolink):
             self.AddFile("KUKA-KR-6-R900-2.robot")
             self.AddFile("w_band_mount.tool")
             self.robot = self.ItemUserPick('KUKA KR 6 R900 2', ITEM_TYPE_ROBOT)
-            self.robot.setPoseTool(self.robot.PoseTool()*rotz(pi))
+            # self.robot.setPoseTool(self.robot.PoseTool()*rotz(pi))
+            self.robot.setPoseTool(self.robot.PoseTool() * rotz(-pi/2))
             self.robot.setVisible(1, VISIBLE_ROBOT_DEFAULT and not VISIBLE_ROBOT_FLANGE)
             self.robot.setSpeed(-1,20)  # Set linear speed in mm/s, joints speed in deg/s
             if coordinates != None or joints != None:

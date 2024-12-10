@@ -28,6 +28,9 @@ SAVE_ON_SCAN_END = False
 scan_type_dict = {"XYZ scan":("X","Y","Z"),"Ludwig 2: AE":("Az","El","R"),
               "Angular sweep":("Az","El","R"),"Ludwig 3":("θ","φ","R"),}
 scan_type_list = list(scan_type_dict.keys())
+
+robot_parse_ASCII = lambda x: np.array([float(y.split()[-1]) for y in x.strip('{}').split(",")])
+robot_parse_ASCII_v = np.vectorize(robot_parse_ASCII,signature='()->(n)')
 def movement_wrapper(f, mute = False):
     @functools.wraps(f)
     def new_function(self, *args, **kw):
@@ -118,6 +121,8 @@ class RobotMovementObject(QtCore.QObject):
     finished_movement = QtCore.pyqtSignal()
     finished_scan = QtCore.pyqtSignal()
     ready_for_acquisition = QtCore.pyqtSignal()
+    robot_position = QtCore.pyqtSignal(str)
+    robot_position_measured = QtCore.pyqtSignal(str)
     def __init__(self):
         super(RobotMovementObject, self).__init__()
         # self.movement_lock = threading.Lock()
@@ -154,7 +159,7 @@ class RobotMovementObject(QtCore.QObject):
     @QtCore.pyqtSlot(tuple,tuple,tuple,dict)
     @movement_wrapper_robot_internal
     def move_robot_to_point_scan(self,coord_tuple=None, index_tuple=None,
-                                 dir_tuple=None, settings= {"scan_type": scan_type_list[0],"distance":1850}):
+                                 dir_tuple=None, settings= {"scan_type": scan_type_list[0],"distance":1850,"random_approach":False}):
         if coord_tuple != None:
             self.began_movement.emit()
             scan_type = settings["scan_type"]
@@ -184,12 +189,32 @@ class RobotMovementObject(QtCore.QObject):
                                                           z=distance - abs(r * np.cos(np.deg2rad(theta))),
                                                           rx=theta * np.sin(np.deg2rad(phi)), ry=-theta * np.cos(np.deg2rad(phi))))
             self.rdk_instance.target_scan.setPose(new_pose)
-            self.moveJointsSafe(new_pose)
-            # print(coord_tuple)
+            if settings["random_approach"]:
+                random_step = 10
+                # self.moveJointsSafe(new_pose* (robomath.eye().Offset((random.random()-0.5)*random_step, (random.random()-0.5)*random_step, 0)), lin=(scan_type == scan_type_list[0]))
+                rand_ang = random.random() * np.pi * 2
+                self.moveJointsSafe(new_pose* (robomath.eye().Offset(np.cos(rand_ang)*random_step, np.sin(rand_ang)*random_step, 0)), lin=(scan_type == scan_type_list[0]))
+
+            self.moveJointsSafe(new_pose,lin= (scan_type==scan_type_list[0]))
+            # self.moveJointsSafe(new_pose, lin= False)
+            # self.moveJointsSafe(new_pose, lin=0)
             time.sleep(self.settle_time)
+
+            # measured_position = robot_parse_ASCII(self.rdk_instance.robot.setParam("Driver", "GET $POS_ACT_MES"))[:6]
+            # # print("1", measured_position)
+            # print("1",measured_position-robomath.Pose_2_KUKA(new_pose))
+            # new_pose2 = robomath.KUKA_2_Pose(np.array(robomath.Pose_2_KUKA(new_pose))*2-measured_position)
+            # # print(coord_tuple)
+            # self.moveJointsSafe(new_pose2, lin=(scan_type == scan_type_list[0]))
+            # time.sleep(self.settle_time)
+            # measured_position = robot_parse_ASCII(self.rdk_instance.robot.setParam("Driver", "GET $POS_ACT_MES"))[:6]
+            # # print("2", measured_position)
+            # print("2",measured_position - robomath.Pose_2_KUKA(new_pose))
+
             self.ready_for_acquisition.emit()
             time.sleep(self.acquisition_time)
             self.arrived_at_point.emit(index_tuple, dir_tuple)
+            # self.robot_position.emit(self.rdk_instance.robot.setParam("Driver","GET $POS_ACT"))
             self.finished_movement.emit()
 
     # @QtCore.pyqtSlot(tuple,tuple,tuple)
@@ -507,6 +532,10 @@ class RobotControlsWidget(QtWidgets.QWidget):
 
         self.man_step_label = QtWidgets.QLabel()
         self.man_step_lineEdit = QtWidgets.QLineEdit()
+        self.robot_lin_speed_label = QtWidgets.QLabel()
+        self.robot_lin_speed_lineEdit = QtWidgets.QLineEdit()
+        self.robot_lin_accel_label = QtWidgets.QLabel()
+        self.robot_lin_accel_lineEdit = QtWidgets.QLineEdit()
         self.robot_joint_speed_label = QtWidgets.QLabel()
         self.robot_joint_speed_lineEdit = QtWidgets.QLineEdit()
         self.robot_joint_accel_label = QtWidgets.QLabel()
@@ -519,6 +548,8 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.set_robot_speed_pushButton = QtWidgets.QPushButton()
         self.robot_joint_speed_lineEdit.setMaximumWidth(40)
         self.robot_joint_accel_lineEdit.setMaximumWidth(40)
+        self.robot_lin_speed_lineEdit.setMaximumWidth(40)
+        self.robot_lin_accel_lineEdit.setMaximumWidth(40)
 
         self.tool_phi_label = QtWidgets.QLabel()
         self.tool_phi_lineEdit = QtWidgets.QLineEdit()
@@ -531,10 +562,14 @@ class RobotControlsWidget(QtWidgets.QWidget):
 
         self.man_step_label.setText("Manual movement step")
         self.man_step_lineEdit.setText("5")
+        self.robot_lin_speed_label.setText("Linear speed")
+        self.robot_lin_accel_label.setText("Linear acceleration")
         self.robot_joint_speed_label.setText("Joints speed")
         self.robot_joint_accel_label.setText("Joints acceleration")
-        self.robot_joint_speed_lineEdit.setText("5")
-        self.robot_joint_accel_lineEdit.setText("5")
+        self.robot_lin_speed_lineEdit.setText("100")
+        self.robot_lin_accel_lineEdit.setText("20")
+        self.robot_joint_speed_lineEdit.setText("2")
+        self.robot_joint_accel_lineEdit.setText("1")
         self.position_reset_pushButton.setText("Reset robot position")
         self.set_H_plane_pushButton.setText("Set H plane")
         self.set_E_plane_pushButton.setText("Set E plane")
@@ -552,11 +587,15 @@ class RobotControlsWidget(QtWidgets.QWidget):
 
         gridLayout.addWidget(self.man_step_label,0,0,1,1)
         gridLayout.addWidget(self.man_step_lineEdit, 0, 1, 1, 1)
-        gridLayout.addWidget(self.robot_joint_speed_label, 0, 2, 1, 1)
-        gridLayout.addWidget(self.robot_joint_speed_lineEdit, 0, 3, 1, 1)
-        gridLayout.addWidget(self.robot_joint_accel_label, 0, 4, 1, 1)
-        gridLayout.addWidget(self.robot_joint_accel_lineEdit, 0, 5, 1, 1)
-        gridLayout.addWidget(self.set_robot_speed_pushButton, 1, 3, 1, 2)
+        gridLayout.addWidget(self.robot_lin_speed_label, 0, 2, 1, 1)
+        gridLayout.addWidget(self.robot_lin_speed_lineEdit, 0, 3, 1, 1)
+        gridLayout.addWidget(self.robot_lin_accel_label, 0, 4, 1, 1)
+        gridLayout.addWidget(self.robot_lin_accel_lineEdit, 0, 5, 1, 1)
+        gridLayout.addWidget(self.robot_joint_speed_label, 0, 6, 1, 1)
+        gridLayout.addWidget(self.robot_joint_speed_lineEdit, 0, 7, 1, 1)
+        gridLayout.addWidget(self.robot_joint_accel_label, 0, 8, 1, 1)
+        gridLayout.addWidget(self.robot_joint_accel_lineEdit, 0, 9, 1, 1)
+        gridLayout.addWidget(self.set_robot_speed_pushButton, 1, 3, 1, 6)
         gridLayout.addWidget(self.position_reset_pushButton, 1, 0, 1, 1)
         # gridLayout.addWidget(self.position_reset_cross_pushButton, 2, 0, 1, 1)
         gridLayout.addWidget(self.set_scan_init_pushButton, 1, 1, 1, 1)
@@ -1278,6 +1317,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # x = threading.Thread(target=self.test_scan)
         # x = QtCore.QThread
         # x.start()
+        self.set_robot_speed()
         self.scan_started = 1
         self.scan_general()
         # if self.scan_type_combobox.currentText() == scan_type_list[0]:
@@ -1316,6 +1356,10 @@ class MainWindow(QtWidgets.QMainWindow):
             dir_2 = 1
             dir_3 = 1
             self.data = np.empty(shape, dtype=complex)
+            self.data_robot_positions = np.empty(shape[:-1], dtype=np.dtype('U250'))
+            self.data_robot_positions_measured = np.empty(shape[:-1], dtype=np.dtype('U250'))
+            self.data_robot_joints = np.empty(shape[:-1], dtype=np.dtype('U250'))
+            # self.data_robot_joint_currents = np.empty(shape[:-1], dtype=np.dtype('U250'))
             # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
             self.data[:] = np.nan
             if self.vna_connected:
@@ -1345,6 +1389,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 dir_2 *= -1
 
             par_dict["random_order"] = self.scan_parameters_widget.random_order_checkBox.isChecked()
+            par_dict["random_approach"] = self.scan_parameters_widget.random_approach_checkBox.isChecked()
 
             if par_dict["random_order"] == True:
                 random.shuffle(self.scanpoint_data)
@@ -1468,10 +1513,25 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.vna_connected:
             if not self.instr.query_bool("*OPC?"):
                 print("WARNING: data has been read before a sweep finished")
-            data_point = self.query_data(1,raw=True)
+            # TODO: select trace to measure
+            data_point = self.query_data(4,raw=True)
             self.data[ix * dir_x - (1 if dir_x < 0 else 0),
             iy * dir_y - (1 if dir_y < 0 else 0),
             iz* dir_z - (1 if dir_z < 0 else 0),:] = data_point
+            self.data_robot_positions[ix * dir_x - (1 if dir_x < 0 else 0),
+            iy * dir_y - (1 if dir_y < 0 else 0),
+            iz * dir_z - (1 if dir_z < 0 else 0)] = self.robot_rdk.robot.setParam("Driver","GET $POS_ACT")
+            self.data_robot_positions_measured[ix * dir_x - (1 if dir_x < 0 else 0),
+            iy * dir_y - (1 if dir_y < 0 else 0),
+            iz * dir_z - (1 if dir_z < 0 else 0)] = self.robot_rdk.robot.setParam("Driver","GET $POS_ACT_MES")
+            self.data_robot_joints[ix * dir_x - (1 if dir_x < 0 else 0),
+                                               iy * dir_y - (1 if dir_y < 0 else 0),
+                                               iz * dir_z - (1 if dir_z < 0 else 0)] = self.robot_rdk.robot.setParam(
+                "Driver", "GET $AXIS_ACT")
+            # self.data_robot_joint_currents[ix * dir_x - (1 if dir_x < 0 else 0),
+            #                                    iy * dir_y - (1 if dir_y < 0 else 0),
+            #                                    iz * dir_z - (1 if dir_z < 0 else 0)] = self.robot_rdk.robot.setParam(
+            #     "Driver", "GET $CURR_ACT")
             self.scan_plot_update()
         # else:
         #     data_point = random.random()
@@ -1522,6 +1582,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_finished = True
 
         current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
+
+        if self.vna_connected:
+            np.save(f"robot_pos_{current_time}",self.data_robot_positions)
+            np.save(f"robot_pos_meas_{current_time}", self.data_robot_positions_measured)
+            np.save(f"robot_joints_{current_time}", self.data_robot_joints)
+            # np.save(f"robot_joint_currents_{current_time}", self.data_robot_joint_currents)
+            self.configs.save_toml(f"{current_time}.toml")
 
         if self.vna_connected:
             self.slice_plot_initialize()
@@ -1628,9 +1695,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_robot_speed(self):
         try:
+            l_speed = float(self.robot_controls_widget.robot_lin_speed_lineEdit.text())
+            l_accel = float(self.robot_controls_widget.robot_lin_accel_lineEdit.text())
             j_speed = float(self.robot_controls_widget.robot_joint_speed_lineEdit.text())
             j_accel = float(self.robot_controls_widget.robot_joint_accel_lineEdit.text())
-            self.robot_rdk.robot.setSpeed(speed_linear=-1,speed_joints=j_speed,accel_joints=j_accel)
+            self.robot_rdk.robot.setSpeed(speed_linear=l_speed,accel_linear=l_accel,speed_joints=j_speed,accel_joints=j_accel)
         except ValueError:
             print('Inputted value is invalid')
 
