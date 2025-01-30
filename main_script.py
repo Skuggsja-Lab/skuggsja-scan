@@ -1322,9 +1322,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.manualCTab,self.scan_parameters_widget, self.scan_plot_w, self.slice_plot_w):
             w.setEnabled(False)
 
-        self.connection_widget.vna_ip_lineEdit.setText(self.configs.VNA_settings["ip"])
-        self.connection_widget.con_vna_pushButton.clicked.connect(self.vna_connect_button_clicked)
-        self.connection_widget.con_robot_pushButton.clicked.connect(self.robot_connect_button_clicked)
+        # self.connection_widget.vna_ip_lineEdit.setText(self.configs.VNA_settings["ip"])
+        # self.connection_widget.con_vna_pushButton.clicked.connect(self.vna_connect_button_clicked)
+        # self.connection_widget.con_robot_pushButton.clicked.connect(self.robot_connect_button_clicked)
 
         RobotStopButton.group.buttonClicked.connect(self.stop_button_clicked)
 
@@ -2103,7 +2103,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def vna_connect_button_clicked(self):
         if not self.vna_connected:
             try:
-                self.instr = RsInstrument.RsInstrument(f"TCPIP::{self.connection_widget.vna_ip_lineEdit.text()}::hislip0",True,False)
+                self.instr = RsInstrument.RsInstrument(f"TCPIP::{self.configs.VNA_settings["ip"]}::hislip0",True,False)
                 self.append_log("Succesfully connected to "+self.instr.query_str("*IDN?"))
                 print(self.instr.query_str("*IDN?"))
                 self.vna_connected = True
