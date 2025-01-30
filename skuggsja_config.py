@@ -9,8 +9,9 @@ class Config:
         self.max_x = 300
         self.min_x = 0
         self.VNA_settings = {}
-
+        self.scan_settings = {}
         self.plot_settings = {"complex": True, "value_to_plot": "Mag dB"}
+        self.misc = {}
 
         with open("defaults.toml", mode="r") as fp:
             config = toml.load(fp)

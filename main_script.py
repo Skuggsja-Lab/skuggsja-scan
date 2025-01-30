@@ -1,3 +1,6 @@
+import pathlib
+
+import matplotlib.pyplot as plt
 from PyQt6 import QtCore, QtGui, QtWidgets
 import sys
 import numpy as np
@@ -20,8 +23,13 @@ import warnings
 import pickle
 import random
 import glob
+import h5py
 import matplotlib.tri as mtri
 import scipy.constants as const
+import ctypes
+# from pathlib import PureWindowsPath, Path
+myappid = 'mycompany.myproduct.subproduct.version' # arbitrary string
+ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 SAVE_ON_SCAN_END = False
@@ -68,7 +76,7 @@ class RobotMovementMonitorObject(QtCore.QObject):
                     self.robot_in_box = self.coords_check()
                 # if self.robot_in_box == False:
                 #     self.rdk_instance.robot.Stop()
-                #     self.kill_signal.emit()
+                #     self.kill_signal.emit()g
                 #     self.worker_thread().exit()
                 #     sys.exit()
             else:
@@ -121,8 +129,6 @@ class RobotMovementObject(QtCore.QObject):
     finished_movement = QtCore.pyqtSignal()
     finished_scan = QtCore.pyqtSignal()
     ready_for_acquisition = QtCore.pyqtSignal()
-    robot_position = QtCore.pyqtSignal(str)
-    robot_position_measured = QtCore.pyqtSignal(str)
     def __init__(self):
         super(RobotMovementObject, self).__init__()
         # self.movement_lock = threading.Lock()
@@ -190,7 +196,7 @@ class RobotMovementObject(QtCore.QObject):
                                                           rx=theta * np.sin(np.deg2rad(phi)), ry=-theta * np.cos(np.deg2rad(phi))))
             self.rdk_instance.target_scan.setPose(new_pose)
             if settings["random_approach"]:
-                random_step = 10
+                random_step = settings["random_approach_distance"]
                 # self.moveJointsSafe(new_pose* (robomath.eye().Offset((random.random()-0.5)*random_step, (random.random()-0.5)*random_step, 0)), lin=(scan_type == scan_type_list[0]))
                 rand_ang = random.random() * np.pi * 2
                 self.moveJointsSafe(new_pose* (robomath.eye().Offset(np.cos(rand_ang)*random_step, np.sin(rand_ang)*random_step, 0)), lin=(scan_type == scan_type_list[0]))
@@ -199,22 +205,9 @@ class RobotMovementObject(QtCore.QObject):
             # self.moveJointsSafe(new_pose, lin= False)
             # self.moveJointsSafe(new_pose, lin=0)
             time.sleep(self.settle_time)
-
-            # measured_position = robot_parse_ASCII(self.rdk_instance.robot.setParam("Driver", "GET $POS_ACT_MES"))[:6]
-            # # print("1", measured_position)
-            # print("1",measured_position-robomath.Pose_2_KUKA(new_pose))
-            # new_pose2 = robomath.KUKA_2_Pose(np.array(robomath.Pose_2_KUKA(new_pose))*2-measured_position)
-            # # print(coord_tuple)
-            # self.moveJointsSafe(new_pose2, lin=(scan_type == scan_type_list[0]))
-            # time.sleep(self.settle_time)
-            # measured_position = robot_parse_ASCII(self.rdk_instance.robot.setParam("Driver", "GET $POS_ACT_MES"))[:6]
-            # # print("2", measured_position)
-            # print("2",measured_position - robomath.Pose_2_KUKA(new_pose))
-
             self.ready_for_acquisition.emit()
             time.sleep(self.acquisition_time)
             self.arrived_at_point.emit(index_tuple, dir_tuple)
-            # self.robot_position.emit(self.rdk_instance.robot.setParam("Driver","GET $POS_ACT"))
             self.finished_movement.emit()
 
     # @QtCore.pyqtSlot(tuple,tuple,tuple)
@@ -436,6 +429,7 @@ class ManualControlWidget(QtWidgets.QWidget):
         self.coordinate = coordinate
 
         self.radioButton = QtWidgets.QRadioButton()
+        self.radioButton.setMaximumWidth(30)
         self.step_label = QtWidgets.QLabel()
         self.step_lineEdit = QtWidgets.QLineEdit()
         self.step_lineEdit.setMaximumSize(QtCore.QSize(40, 30))
@@ -469,13 +463,13 @@ class ManualControlWidget(QtWidgets.QWidget):
         self.plus_pushButton.setStyleSheet("font-weight: bold")
 
         layout.addWidget(self.radioButton, 0, 0, 1, 1)
-        layout.addWidget(self.step_label, 0, 1, 1, 1)
+        # layout.addWidget(self.step_label, 0, 1, 1, 1)
         layout.addWidget(self.step_lineEdit, 0, 2, 1, 1)
-        layout.addWidget(self.horizontalSlider, 0, 3, 1, 1)
-        layout.addWidget(self.man_label, 0, 4, 1, 1)
-        layout.addWidget(self.man_lineEdit, 0, 5, 1, 1)
+        # layout.addWidget(self.horizontalSlider, 0, 3, 1, 1)
+        # layout.addWidget(self.man_label, 0, 4, 1, 1)
+        # layout.addWidget(self.man_lineEdit, 0, 5, 1, 1)
         layout.addWidget(self.pos_fdbk_label, 0, 6, 1, 1)
-        layout.addWidget(self.dlabel, 0, 7, 1, 1)
+        # layout.addWidget(self.dlabel, 0, 7, 1, 1)
         layout.addWidget(self.dfdbk_label, 0, 8, 1, 1)
 
         self.radioButton.toggled.connect(self.radio_button_check)
@@ -486,15 +480,15 @@ class ManualControlWidget(QtWidgets.QWidget):
         self.setLayout(layout)
 
         self.widget_touple = (self.radioButton,
-        self.step_label,
+        # self.step_label,
         self.step_lineEdit,
-        self.horizontalSlider,
+        # self.horizontalSlider,
         self.minus_pushButton,
         self.plus_pushButton,
-        self.man_label,
-        self.man_lineEdit,
+        # self.man_label,
+        # self.man_lineEdit,
         self.pos_fdbk_label,
-        self.dlabel,
+        # self.dlabel,
         self.dfdbk_label)
 
         for w in self.widget_touple[1:]:
@@ -526,8 +520,11 @@ class RobotControlsWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(RobotControlsWidget, self).__init__(parent)
         self.VLayout = QtWidgets.QVBoxLayout(self)
-        gridLayout = QtWidgets.QGridLayout()
-        gridLayout2 = QtWidgets.QGridLayout()
+        gridLayout_movement = QtWidgets.QGridLayout()
+        gridLayout_speed = QtWidgets.QGridLayout()
+        HLayout_speed = QtWidgets.QHBoxLayout()
+        gridLayout_rotation = QtWidgets.QGridLayout()
+        HLayout_rotation = QtWidgets.QHBoxLayout()
         self.stop_pushButton = RobotStopButton()
 
         self.man_step_label = QtWidgets.QLabel()
@@ -546,10 +543,14 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.set_tool_rotation_pushButton = QtWidgets.QPushButton()
         self.set_scan_init_pushButton = QtWidgets.QPushButton()
         self.set_robot_speed_pushButton = QtWidgets.QPushButton()
-        self.robot_joint_speed_lineEdit.setMaximumWidth(40)
-        self.robot_joint_accel_lineEdit.setMaximumWidth(40)
-        self.robot_lin_speed_lineEdit.setMaximumWidth(40)
-        self.robot_lin_accel_lineEdit.setMaximumWidth(40)
+        self.robot_joint_speed_lineEdit.setMaximumWidth(30)
+        self.robot_joint_accel_lineEdit.setMaximumWidth(30)
+        self.robot_lin_speed_lineEdit.setMaximumWidth(30)
+        self.robot_lin_accel_lineEdit.setMaximumWidth(30)
+        # self.robot_joint_speed_label.setMaximumWidth(30)
+        # self.robot_joint_accel_label.setMaximumWidth(30)
+        # self.robot_lin_speed_label.setMaximumWidth(30)
+        # self.robot_lin_accel_label.setMaximumWidth(30)
 
         self.tool_phi_label = QtWidgets.QLabel()
         self.tool_phi_lineEdit = QtWidgets.QLineEdit()
@@ -559,6 +560,15 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.tool_el_lineEdit = QtWidgets.QLineEdit()
         self.tool_z_label = QtWidgets.QLabel()
         self.tool_z_lineEdit = QtWidgets.QLineEdit()
+
+        self.tool_phi_lineEdit.setMaximumWidth(30)
+        self.tool_az_lineEdit.setMaximumWidth(30)
+        self.tool_el_lineEdit.setMaximumWidth(30)
+        self.tool_z_lineEdit.setMaximumWidth(30)
+        # self.tool_phi_label.setMaximumWidth(30)
+        # self.tool_az_label.setMaximumWidth(30)
+        # self.tool_el_label.setMaximumWidth(30)
+        # self.tool_z_label.setMaximumWidth(60)
 
         self.man_step_label.setText("Manual movement step")
         self.man_step_lineEdit.setText("5")
@@ -585,37 +595,52 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.tool_el_lineEdit.setText("0")
         self.tool_z_lineEdit.setText("0")
 
-        gridLayout.addWidget(self.man_step_label,0,0,1,1)
-        gridLayout.addWidget(self.man_step_lineEdit, 0, 1, 1, 1)
-        gridLayout.addWidget(self.robot_lin_speed_label, 0, 2, 1, 1)
-        gridLayout.addWidget(self.robot_lin_speed_lineEdit, 0, 3, 1, 1)
-        gridLayout.addWidget(self.robot_lin_accel_label, 0, 4, 1, 1)
-        gridLayout.addWidget(self.robot_lin_accel_lineEdit, 0, 5, 1, 1)
-        gridLayout.addWidget(self.robot_joint_speed_label, 0, 6, 1, 1)
-        gridLayout.addWidget(self.robot_joint_speed_lineEdit, 0, 7, 1, 1)
-        gridLayout.addWidget(self.robot_joint_accel_label, 0, 8, 1, 1)
-        gridLayout.addWidget(self.robot_joint_accel_lineEdit, 0, 9, 1, 1)
-        gridLayout.addWidget(self.set_robot_speed_pushButton, 1, 3, 1, 6)
-        gridLayout.addWidget(self.position_reset_pushButton, 1, 0, 1, 1)
+        # gridLayout_movement.addWidget(self.man_step_label,0,0,1,1)
+        # gridLayout_movement.addWidget(self.man_step_lineEdit, 0, 1, 1, 1)
+        gridLayout_movement.addWidget(self.position_reset_pushButton, 1, 0, 1, 1)
         # gridLayout.addWidget(self.position_reset_cross_pushButton, 2, 0, 1, 1)
-        gridLayout.addWidget(self.set_scan_init_pushButton, 1, 1, 1, 1)
-        gridLayout2.addWidget(self.set_H_plane_pushButton,0,0,1,1)
-        gridLayout2.addWidget(self.set_E_plane_pushButton, 0, 1, 1, 1)
-        gridLayout2.addWidget(self.set_tool_rotation_pushButton, 0, 2, 1, 1)
-        gridLayout2.addWidget(self.tool_phi_label, 0, 3, 1, 1)
-        gridLayout2.addWidget(self.tool_phi_lineEdit, 0, 4, 1, 1)
-        gridLayout2.addWidget(self.tool_az_label, 0, 5, 1, 1)
-        gridLayout2.addWidget(self.tool_az_lineEdit, 0, 6, 1, 1)
-        gridLayout2.addWidget(self.tool_el_label, 0, 7, 1, 1)
-        gridLayout2.addWidget(self.tool_el_lineEdit, 0, 8, 1, 1)
-        gridLayout2.addWidget(self.tool_z_label, 0, 9, 1, 1)
-        gridLayout2.addWidget(self.tool_z_lineEdit, 0, 10, 1, 1)
+        gridLayout_movement.addWidget(self.set_scan_init_pushButton, 1, 1, 1, 1)
+        # gridLayout_speed.addWidget(self.robot_lin_speed_label, 0, 0, 1, 1)
+        # gridLayout_speed.addWidget(self.robot_lin_speed_lineEdit, 0, 1, 1, 1)
+        # gridLayout_speed.addWidget(self.robot_lin_accel_label, 0, 2, 1, 1)
+        # gridLayout_speed.addWidget(self.robot_lin_accel_lineEdit, 0, 3, 1, 1)
+        # gridLayout_speed.addWidget(self.robot_joint_speed_label, 0, 4, 1, 1)
+        # gridLayout_speed.addWidget(self.robot_joint_speed_lineEdit, 0, 5, 1, 1)
+        # gridLayout_speed.addWidget(self.robot_joint_accel_label, 0, 6, 1, 1)
+        # gridLayout_speed.addWidget(self.robot_joint_accel_lineEdit, 0, 7, 1, 1)
+        # gridLayout_rotation.addWidget(self.tool_phi_label, 0, 1, 1, 1)
+        # gridLayout_rotation.addWidget(self.tool_phi_lineEdit, 0, 2, 1, 1)
+        # gridLayout_rotation.addWidget(self.tool_az_label, 0, 3, 1, 1)
+        # gridLayout_rotation.addWidget(self.tool_az_lineEdit, 0, 4, 1, 1)
+        # gridLayout_rotation.addWidget(self.tool_el_label, 0, 5, 1, 1)
+        # gridLayout_rotation.addWidget(self.tool_el_lineEdit, 0, 6, 1, 1)
+        # gridLayout_rotation.addWidget(self.tool_z_label, 0, 7, 1, 1)
+        # gridLayout_rotation.addWidget(self.tool_z_lineEdit, 0, 8, 1, 1)
+        gridLayout_speed.addWidget(self.set_robot_speed_pushButton, 1, 0, 1, 7)
+        speed_widgets = [self.robot_lin_speed_label,self.robot_lin_speed_lineEdit,
+                         self.robot_lin_accel_label,self.robot_lin_accel_lineEdit,
+                         self.robot_joint_speed_label,self.robot_joint_speed_lineEdit,
+                         self.robot_joint_accel_label,self.robot_joint_accel_lineEdit]
+        for w in speed_widgets:
+            HLayout_speed.addWidget(w)
+        tool_widgets = [self.tool_phi_label,self.tool_phi_lineEdit,self.tool_az_label,self.tool_az_lineEdit,
+                        self.tool_el_label,self.tool_el_lineEdit,self.tool_z_label,self.tool_z_lineEdit]
+        for w in tool_widgets:
+            HLayout_rotation.addWidget(w)
+        gridLayout_rotation.addWidget(self.set_H_plane_pushButton,1,1,1,1)
+        gridLayout_rotation.addWidget(self.set_E_plane_pushButton, 1, 2, 1, 1)
+        gridLayout_rotation.addWidget(self.set_tool_rotation_pushButton, 1, 3, 1, 3)
 
-        self.VLayout.addLayout(gridLayout)
-        self.VLayout.addLayout(gridLayout2)
+        self.VLayout.addLayout(gridLayout_movement)
+        self.VLayout.addLayout(HLayout_speed)
+        self.VLayout.addLayout(gridLayout_speed)
+        self.VLayout.addLayout(HLayout_rotation)
+        self.VLayout.addLayout(gridLayout_rotation)
         self.VLayout.addWidget(self.stop_pushButton)
 
-        size_policy = QtWidgets.QSizePolicy()
+        size_policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum,QtWidgets.QSizePolicy.Policy.Minimum)
+        for w in speed_widgets+tool_widgets:
+            w.setSizePolicy(size_policy)
         self.setSizePolicy(size_policy)
         
         
@@ -737,11 +762,20 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.random_order_checkBox.setText("Point order")
         self.random_approach_checkBox = QtWidgets.QCheckBox()
         self.random_approach_checkBox.setText("Approach direction")
+        self.random_approach_dist_label = QtWidgets.QLabel()
+        self.random_approach_dist_label.setText("Distance, mm")
+        self.random_approach_dist_lineEdit = QtWidgets.QLineEdit()
+        self.random_approach_dist_lineEdit.setText("1")
+        self.random_approach_dist_lineEdit.setMaximumWidth(50)
         random_layout = QtWidgets.QHBoxLayout()
         random_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         random_layout.addWidget(self.random_label)
         random_layout.addWidget(self.random_order_checkBox)
         random_layout.addWidget(self.random_approach_checkBox)
+        random_layout.addWidget(self.random_approach_dist_label)
+        random_layout.addWidget(self.random_approach_dist_lineEdit)
+        random_layout.addSpacerItem(QtWidgets.QSpacerItem(10, 10, QtWidgets.QSizePolicy.Policy.Expanding,
+                                                                 QtWidgets.QSizePolicy.Policy.Minimum))
 
         self.scan_start_pushButton = QtWidgets.QPushButton()
         self.scan_start_pushButton.setText("Start scan")
@@ -841,8 +875,8 @@ class VNAParametersWidget(QtWidgets.QWidget):
         self.avg_num_label = QtWidgets.QLabel()
         self.avg_num_label.setText("Averaging samples")
         self.avg_num_lineEdit = QtWidgets.QLineEdit()
-        self.ab_checkBox = QtWidgets.QCheckBox()
-        self.ab_checkBox.setText("A/B")
+        # self.ab_checkBox = QtWidgets.QCheckBox()
+        # self.ab_checkBox.setText("A/B")
         self.fwbw_checkBox = QtWidgets.QCheckBox()
         self.fwbw_checkBox.setText("Frwd/Bckwd")
         self.avg_checkBox = QtWidgets.QCheckBox()
@@ -850,22 +884,22 @@ class VNAParametersWidget(QtWidgets.QWidget):
         self.pushButton = QtWidgets.QPushButton()
         self.pushButton.setText("Send to VNA")
 
-        self.gridLayout.addWidget(self.ifbw_label, 0, 0, 1, 1)
-        self.gridLayout.addWidget(self.ifbw_lineEdit, 0, 1, 1, 1)
-        self.gridLayout.addWidget(self.fmin_label, 0, 2, 1, 1)
-        self.gridLayout.addWidget(self.fmin_lineEdit, 0, 3, 1, 1)
-        self.gridLayout.addWidget(self.fmax_label, 0, 4, 1, 1)
-        self.gridLayout.addWidget(self.fmax_lineEdit, 0, 5, 1, 1)
-        self.gridLayout.addWidget(self.fstp_label, 0, 6, 1, 1)
-        self.gridLayout.addWidget(self.fstp_lineEdit, 0, 7, 1, 1)
-        self.gridLayout.addWidget(self.pwr_label, 1, 0, 1, 1)
-        self.gridLayout.addWidget(self.pwr_lineEdit, 1, 1, 1, 1)
-        self.gridLayout.addWidget(self.avg_num_label, 1, 2, 1, 1)
-        self.gridLayout.addWidget(self.avg_num_lineEdit, 1, 3, 1, 1)
-        self.gridLayout.addWidget(self.ab_checkBox, 1, 4, 1, 1)
-        self.gridLayout.addWidget(self.fwbw_checkBox, 1, 5, 1, 1)
-        self.gridLayout.addWidget(self.avg_checkBox, 1, 6, 1, 1)
-        self.gridLayout.addWidget(self.pushButton, 1, 7, 1, 1)
+        self.gridLayout.addWidget(self.fmin_label, 0, 0, 1, 1)
+        self.gridLayout.addWidget(self.fmin_lineEdit, 0, 1, 1, 1)
+        self.gridLayout.addWidget(self.fmax_label, 0, 2, 1, 1)
+        self.gridLayout.addWidget(self.fmax_lineEdit, 0, 3, 1, 1)
+        self.gridLayout.addWidget(self.ifbw_label, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.ifbw_lineEdit, 1, 1, 1, 1)
+        self.gridLayout.addWidget(self.fstp_label, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.fstp_lineEdit, 1, 3, 1, 1)
+        self.gridLayout.addWidget(self.avg_num_label, 2, 0, 1, 1)
+        self.gridLayout.addWidget(self.avg_num_lineEdit, 2, 1, 1, 1)
+        self.gridLayout.addWidget(self.avg_checkBox, 2, 2, 1, 1)
+        self.gridLayout.addWidget(self.fwbw_checkBox, 2, 3, 1, 1)
+        self.gridLayout.addWidget(self.pwr_label, 3, 0, 1, 1)
+        self.gridLayout.addWidget(self.pwr_lineEdit, 3, 1, 1, 1)
+        # self.gridLayout.addWidget(self.ab_checkBox, 1, 4, 1, 1)
+        self.gridLayout.addWidget(self.pushButton, 3, 3, 1, 1)
 
         self.VLayout.addLayout(self.gridLayout)
         size_policy = QtWidgets.QSizePolicy()
@@ -900,25 +934,120 @@ class RobotStartWidget(QtWidgets.QWidget):
 class DataFileWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(DataFileWidget, self).__init__(parent)
-        self.gridLayout = QtWidgets.QGridLayout(self)
+        vLayout = QtWidgets.QVBoxLayout(self)
+        gridLayout = QtWidgets.QGridLayout()
+        hLayout = QtWidgets.QHBoxLayout()
 
+        self.filename_label = QtWidgets.QLabel()
+        self.filename_label2 = QtWidgets.QLabel()
         self.filename_textbox = QtWidgets.QLineEdit()
-        self.button_save_points = QtWidgets.QPushButton()
-        self.button_load_points = QtWidgets.QPushButton()
+        self.filename_textbox = QtWidgets.QLineEdit()
+        self.button_load_file = QtWidgets.QPushButton()
+        self.button_save_file = QtWidgets.QPushButton()
+        self.button_save_file_as = QtWidgets.QPushButton()
         # TODO: saving files as dataframes
         self.sim_textbox = QtWidgets.QLineEdit()
         self.button_load_points_sim = QtWidgets.QPushButton()
 
-        self.button_save_points.setText("Save points as .nb")
-        self.button_load_points.setText("Load points from .nb")
+        self.filename_label2.setText("Current file name:")
+
+        self.button_load_file.setText("Load file")
+        self.button_save_file.setText("Save file")
+        self.button_save_file_as.setText("Save file as")
         self.sim_textbox.setText("Farfield_w_band")
         self.button_load_points_sim.setText("Load simulation data")
 
-        self.gridLayout.addWidget(self.filename_textbox,0,0,1,1)
-        self.gridLayout.addWidget(self.button_save_points,0,1,1,1)
-        self.gridLayout.addWidget(self.button_load_points,0,2,1,1)
-        self.gridLayout.addWidget(self.sim_textbox,1 , 0, 1, 1)
-        self.gridLayout.addWidget(self.button_load_points_sim, 1, 2, 1, 1)
+        hLayout.addWidget(self.filename_label2)
+        hLayout.addWidget(self.filename_label)
+        self.filename_label.setMaximumWidth(400)
+        self.filename_label.setWordWrap(True)
+        hLayout.addItem(QtWidgets.QSpacerItem(10, 10, QtWidgets.QSizePolicy.Policy.Expanding,
+                                                                 QtWidgets.QSizePolicy.Policy.Minimum))
+        gridLayout.addWidget(self.button_load_file, 0, 0, 1, 1)
+        gridLayout.addWidget(self.button_save_file,0,1,1,1)
+        gridLayout.addWidget(self.button_save_file_as, 0, 2, 1, 1)
+        gridLayout.addWidget(self.filename_textbox,0,3,1,1)
+        gridLayout.addWidget(self.sim_textbox,1 , 0, 1, 3)
+        gridLayout.addWidget(self.button_load_points_sim, 1, 3, 1, 1)
+        vLayout.addLayout(hLayout)
+        vLayout.addLayout(gridLayout)
+
+    def update_filename(self, new_text):
+        self.filename_label.setText(new_text)
+
+class AttributeWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(AttributeWidget, self).__init__(parent)
+        Hlayout = QtWidgets.QHBoxLayout(self)
+        attr_menuWidget = QtWidgets.QWidget()
+        fname_menuWidget = QtWidgets.QWidget()
+        Vlayout2 = QtWidgets.QVBoxLayout(attr_menuWidget)
+        Vlayout3 = QtWidgets.QVBoxLayout(fname_menuWidget)
+        # menuWidget.setLayout(Vlayout2)
+
+        self.button_attr = QtWidgets.QToolButton(self)
+        self.button_attr.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.button_attr.setMenu(QtWidgets.QMenu(self.button_attr))
+        self.button_attr.setText("Set up attributes")
+        action = QtWidgets.QWidgetAction(self.button_attr)
+
+        self.button_fname = QtWidgets.QToolButton(self)
+        self.button_fname.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.button_fname.setMenu(QtWidgets.QMenu(self.button_fname))
+        self.button_fname.setText("Set up file name format")
+        action_fname = QtWidgets.QWidgetAction(self.button_fname)
+
+        self.params_table = QtWidgets.QTableWidget(1,2)
+        for row in range(self.params_table.rowCount()):
+            # self.params_table.setCellWidget(row,3,QtWidgets.QCheckBox())
+            self.params_table.setItem(row,0,QtWidgets.QTableWidgetItem())
+            # self.params_table.item(row,0).setCheckState(QtCore.Qt.CheckState.Unchecked)
+
+        self.params_table.setHorizontalHeaderLabels(["attr","value","filename"])
+        self.params_table.setSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Expanding)
+
+        self.add_row_button = QtWidgets.QPushButton()
+        self.add_row_button.clicked.connect(self.add_row_to_table)
+        self.add_row_button.setText("Add attribute")
+
+        self.fname_lineEdit = QtWidgets.QLineEdit()
+        self.preview_button = QtWidgets.QPushButton()
+        self.preview_button.setText("Preview")
+        self.fname_manual = QtWidgets.QLabel()
+        self.fname_manual.setText("List attributes to use in the file name\n"
+                                  "Use ',' as the delimiter\n"
+                                  "No prefix for attribute value\n"
+                                  "'!' for name and value\n"
+                                  "'#' for additional strings")
+        self.fname = ""
+
+        Vlayout2.addWidget(self.params_table)
+        Vlayout2.addWidget(self.add_row_button)
+        Vlayout3.addWidget(self.fname_lineEdit)
+        Vlayout3.addWidget(self.preview_button)
+        Vlayout3.addWidget(self.fname_manual)
+        action.setDefaultWidget(attr_menuWidget)
+        self.button_attr.menu().addAction(action)
+        action_fname.setDefaultWidget(fname_menuWidget)
+        self.button_fname.menu().addAction(action_fname)
+        Hlayout.addWidget(self.button_attr)
+        Hlayout.addWidget(self.button_fname)
+        Hlayout.addItem(QtWidgets.QSpacerItem(10, 10, QtWidgets.QSizePolicy.Policy.Expanding,
+                                                                 QtWidgets.QSizePolicy.Policy.Minimum))
+
+    def insert_item_in_table(self,attr,val,row=None):
+        if row == None:
+            row = self.params_table.rowCount()
+        self.params_table.insertRow(row)
+        self.params_table.setItem(row, 0, QtWidgets.QTableWidgetItem(attr))
+        self.params_table.setItem(row, 1, QtWidgets.QTableWidgetItem(str(val)))
+        # self.params_table.item(row, 0).setCheckState(QtCore.Qt.CheckState.Unchecked)
+
+    def add_row_to_table(self):
+        self.params_table.insertRow(self.params_table.rowCount())
+        self.params_table.setItem(self.params_table.rowCount()-1, 0, QtWidgets.QTableWidgetItem())
+        self.params_table.item(self.params_table.rowCount()-1, 0).setCheckState(QtCore.Qt.CheckState.Unchecked)
+
 
 class FeedbackWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, type = scan_type_list[0]):
@@ -1028,10 +1157,16 @@ class PlotWidget(QtWidgets.QWidget):
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.VLayout.addWidget(self.toolbar)
         self.VLayout.addWidget(self.canvas)
-        self.plot_formats = {"Magnitude": abs, "Phase": np.angle, "Mag dB": lambda x: 20 * np.log10(np.abs(x)),
+        # self.plot_formats = {"Magnitude": abs, "Phase": lambda x: np.degrees(np.angle(x)), "Mag dB": lambda x: 20 * np.log10(np.abs(x)),
+        #                      "Real": np.real, "Imaginary": np.imag}
+        self.plot_formats = {"Magnitude": abs,
+                             "Phase": lambda x: np.degrees(np.angle(x*np.exp(1j*(np.pi-np.angle(x)[x.shape[0]//2,x.shape[1]//2]-15/180*np.pi)))),
+                             "Mag dB": lambda x: 20 * np.log10(np.abs(x)),
                              "Real": np.real, "Imaginary": np.imag}
         self.plot_format_units = {"Magnitude": "mW", "Phase": "degrees", "Mag dB": "dBm",
                                   "Real": "mW", "Imaginary": "mW"}
+
+
 
 class VNAPlotWidget(PlotWidget):
     def __init__(self, parent=None):
@@ -1059,6 +1194,9 @@ class VNAPlotWidget(PlotWidget):
 
         self.VLayout.addLayout(self.gridLayout)
 
+        self.ax = self.figure.add_subplot(111)
+        self.ax.set_xlabel('Frequency, GHz')
+
 class ScanPlotWidget(PlotWidget):
     def __init__(self, parent=None):
         super(ScanPlotWidget, self).__init__(parent)
@@ -1066,7 +1204,8 @@ class ScanPlotWidget(PlotWidget):
 
         self.plot_format_combobox = QtWidgets.QComboBox()
         self.slice_direction_combobox = QtWidgets.QComboBox()
-        self.checkbox_fft = QtWidgets.QRadioButton()
+        self.checkbox_fft = QtWidgets.QCheckBox()
+        self.checkbox_norm = QtWidgets.QCheckBox()
         self.checkbox_backpropagation = QtWidgets.QCheckBox()
         self.backpropagation_distance_label = QtWidgets.QLabel()
         self.backpropagation_distance_textfield = QtWidgets.QLineEdit()
@@ -1081,6 +1220,11 @@ class ScanPlotWidget(PlotWidget):
         self.frequency_slider = QtWidgets.QSlider()
         self.frequency_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
 
+        size_policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Minimum)
+        self.checkbox_norm.setSizePolicy(size_policy)
+        self.checkbox_fft.setSizePolicy(size_policy)
+
+        self.checkbox_norm.setText("Norm.")
         self.checkbox_fft.setText("2D XY FFT")
         self.checkbox_fft.setEnabled(False)
         self.checkbox_backpropagation.setText("Backpropagation")
@@ -1093,14 +1237,15 @@ class ScanPlotWidget(PlotWidget):
         self.slice_direction_combobox.addItems(self.slice_directions.keys())
 
         self.gridLayout.addWidget(self.plot_format_combobox, 1, 0, 1, 2)
-        self.gridLayout.addWidget(self.checkbox_fft, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.checkbox_norm, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.checkbox_fft, 1, 3, 1, 1)
         self.gridLayout.addWidget(self.slice_direction_combobox, 2, 0, 1, 2)
         self.gridLayout.addWidget(self.coordinate_label, 4, 0, 1, 1)
         self.gridLayout.addWidget(self.coordinate_textfield, 4, 1, 1, 1)
-        self.gridLayout.addWidget(self.coordinate_slider, 4, 2, 1, 1)
+        self.gridLayout.addWidget(self.coordinate_slider, 4, 2, 1, 2)
         self.gridLayout.addWidget(self.frequency_label, 3, 0, 1, 1)
         self.gridLayout.addWidget(self.frequency_textfield, 3, 1, 1, 1)
-        self.gridLayout.addWidget(self.frequency_slider, 3, 2, 1, 1)
+        self.gridLayout.addWidget(self.frequency_slider, 3, 2, 1, 2)
 
         self.backpropagation_distance_slider.setMaximum(2500)
         # self.backpropagation_distance_slider.setMinimum(-500)
@@ -1114,7 +1259,8 @@ class ScanPlotWidget(PlotWidget):
         self.VLayout.addLayout(self.gridLayout)
         self.VLayout.addLayout(fft_hLayout)
 
-        self.ax_scan = self.figure.add_subplot(111)
+        self.ax_scan = self.figure.add_axes([0.15, 0.2, 0.80, 0.75])
+        self.ax_cb = self.figure.add_axes([0.09, 0.08, 0.84, 0.04])
 
 
 class SlicePlotWidget(PlotWidget):
@@ -1152,10 +1298,13 @@ class MainWindow(QtWidgets.QMainWindow):
     send_acquisition_time = QtCore.pyqtSignal(float)
     send_tool_plane = QtCore.pyqtSignal(bool)
     send_tool_rotation = QtCore.pyqtSignal(float,float,float,float)
+
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
         self.configs = Config("aaa.toml")
+        self.setAcceptDrops(True)
         self.setupUi(self)
+        self.setWindowIcon(QtGui.QIcon('cmbeam_logo.svg'))
         self.vna_connected = False
         self.sim_data_available = False
         self.vna_parameters_widget.setEnabled(False)
@@ -1181,7 +1330,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer = QtCore.QTimer()
         self.timer.setInterval(10)
         self.timer.stop()
-        self.timer.timeout.connect(self.plot_update)
+        self.timer.timeout.connect(self.trace_plot_update_from_VNA)
         self.toggle_var = False
         self.vna_parameters_widget.pushButton.clicked.connect(self.send_to_vna_button_clicked)
         self.vna_plot_w.button_update_continuous.clicked.connect(self.toggle)
@@ -1195,8 +1344,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.move_timer.setInterval(10)
         self.move_timer.timeout.connect(self.move_timer_func)
         self.manual_direction = "+Z"
-        ManualControlWidget.group_minus.buttonPressed.connect(self.minus_button_pressed)
-        ManualControlWidget.group_plus.buttonPressed.connect(self.plus_button_pressed)
+        ManualControlWidget.group_minus.buttonPressed.connect(lambda: self.manual_button_pressed("-"))
+        ManualControlWidget.group_plus.buttonPressed.connect(lambda: self.manual_button_pressed("+"))
         ManualControlWidget.group_minus.buttonReleased.connect(self.manual_button_released)
         ManualControlWidget.group_plus.buttonReleased.connect(self.manual_button_released)
 
@@ -1214,9 +1363,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
 
-        self.file_widget.button_save_points.clicked.connect(lambda: self.save_data_file(self.file_widget.filename_textbox.text()))
-        self.file_widget.button_load_points.clicked.connect(lambda: self.load_data_file(self.file_widget.filename_textbox.text()))
+        self.file_widget.button_load_file.clicked.connect(lambda: self.load_data_file(
+            QtWidgets.QFileDialog.getOpenFileName(self, 'Open file', r'c:\\Users\giguv\Desktop\skuggsja-scan',"HDF5 File (*.hdf5);;Numpy binary file (*.npy)")))
+        self.file_widget.button_save_file.clicked.connect(
+            lambda: self.save_data_file(self.form_filename()+
+                                        ("_" if (self.form_filename() and self.file_widget.filename_textbox.text()) else "") +
+                                        self.file_widget.filename_textbox.text()))
+        self.file_widget.button_save_file_as.clicked.connect(
+            lambda: self.save_data_file(QtWidgets.QFileDialog.getSaveFileName(
+                self, 'Save file',self.form_filename()+
+                                  ("_" if (self.form_filename() and self.file_widget.filename_textbox.text()) else "")+
+                                  self.file_widget.filename_textbox.text(),"HDF5 File (*.hdf5);;Numpy binary file (*.npy)")))
+
         self.file_widget.button_load_points_sim.clicked.connect(self.load_sim_data_file)
+
+        for ai, attr in enumerate(self.configs.misc):
+            self.attr_widget.insert_item_in_table(attr,self.configs.misc[attr],row=ai)
+        self.attr_widget.preview_button.clicked.connect(self.form_filename)
+        if hasattr(self.configs,"format_string"):
+            self.attr_widget.fname_lineEdit.setText(self.configs.format_string)
 
         self.run_on_robot = False
         self.robot_start_widget.simulate_pushButton.clicked.connect(self.run_program_in_sim)
@@ -1228,7 +1393,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scan_plot_w.frequency_slider.sliderReleased.connect(lambda: self.freq_select_vline.set_visible(False))
         self.scan_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
         self.scan_plot_w.plot_format_combobox.currentTextChanged.connect(self.scan_plot_update)
+        self.scan_plot_w.plot_format_combobox.currentTextChanged.connect(self.trace_plot_initialize)
         self.scan_plot_w.checkbox_fft.clicked.connect(self.scan_plot_update)
+        self.scan_plot_w.checkbox_norm.clicked.connect(self.scan_plot_update)
         self.scan_plot_w.checkbox_backpropagation.clicked.connect(self.scan_plot_update)
         self.scan_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed)
         self.scan_plot_w.backpropagation_distance_slider.valueChanged.connect(self.scan_plot_update)
@@ -1236,17 +1403,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.slice_plot_w.slice_direction_combobox.currentTextChanged.connect(self.update_coord_slider)
         self.slice_plot_w.coordinate_slider.valueChanged.connect(self.coordinate_slider_changed_slice)
 
+    def dragEnterEvent(self, event):
+        data = event.mimeData().text()
+        if data[:4] == "file" and data.split(".")[-1] in ["npy","hdf5"]:
+            event.acceptProposedAction()
 
-    def minus_button_pressed(self):
+    def dropEvent(self, event):
+        filepath = event.mimeData().urls()[0].toLocalFile()
+        self.load_data_file(filepath)
+        event.acceptProposedAction()
+
+    def manual_button_pressed(self,sign):
         a = [x.radioButton.text() for x in self.coordinates_widgets_list]
         b = [x.radioButton.isChecked() for x in self.coordinates_widgets_list].index(True)
-        self.manual_direction = ("-" + a[b])
-        self.move_timer.start()
-
-    def plus_button_pressed(self):
-        a = [x.radioButton.text() for x in self.coordinates_widgets_list]
-        b = [x.radioButton.isChecked() for x in self.coordinates_widgets_list].index(True)
-        self.manual_direction = ("+" + a[b])
+        c = [abs(float(x.step_lineEdit.text())) for x in self.coordinates_widgets_list]
+        self.manual_direction = (sign + a[b])
+        self.manual_step = c[b]
         self.move_timer.start()
 
     def manual_button_released(self):
@@ -1264,6 +1436,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             "+A": (0, 0, 0, 1, 0, 0), "+B": (0, 0, 0, 0, 1, 0), "+C": (0, 0, 0, 0, 0, 1),
                             "-A": (0, 0, 0, -1, 0, 0), "-B": (0, 0, 0, 0, -1, 0), "-C": (0, 0, 0, 0, 0, -1)}
                     step = float(self.robot_controls_widget.man_step_lineEdit.text())
+                    step = self.manual_step
                     # self.current_robot_pose = self.robot_rdk.move_relative([x*speed for x in dict[self.manual_direction]])
                     # self.update_current_robot_pose()
                     self.send_movement_coords_rel.emit(tuple([x*step for x in dict[self.manual_direction]]))
@@ -1356,9 +1529,11 @@ class MainWindow(QtWidgets.QMainWindow):
             dir_2 = 1
             dir_3 = 1
             self.data = np.empty(shape, dtype=complex)
-            self.data_robot_positions = np.empty(shape[:-1], dtype=np.dtype('U250'))
-            self.data_robot_positions_measured = np.empty(shape[:-1], dtype=np.dtype('U250'))
-            self.data_robot_joints = np.empty(shape[:-1], dtype=np.dtype('U250'))
+            shape2 = shape[:-1] if self.vna_connected else shape
+            self.data_robot_positions = np.empty(shape2, dtype=np.dtype('U250'))
+            self.data_robot_positions_measured = np.empty(shape2, dtype=np.dtype('U250'))
+            self.data_robot_joints = np.empty(shape2, dtype=np.dtype('U250'))
+            self.data_time = np.empty(shape2, dtype=np.dtype('f8'))
             # self.data_robot_joint_currents = np.empty(shape[:-1], dtype=np.dtype('U250'))
             # X_grid, Y_grid = np.meshgrid(points_axes[0],points_axes[1])
             self.data[:] = np.nan
@@ -1370,11 +1545,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scanpoint_data = []
             self.scanpoint_index = 0
 
-            settle_time = float(self.scan_parameters_widget.sttl_lineEdit.text())
-            self.send_settle_time.emit(settle_time)
+            par_dict["settle_time"] = float(self.scan_parameters_widget.sttl_lineEdit.text())
+            self.send_settle_time.emit(par_dict["settle_time"])
             if self.vna_connected:
-                acq_time = float(self.scan_parameters_widget.acq_labelFramed.text())
-                self.send_acquisition_time.emit(acq_time)
+                par_dict["acquisition_time"] = float(self.scan_parameters_widget.acq_labelFramed.text())
+                self.send_acquisition_time.emit(par_dict["acquisition_time"])
             # except ValueError:
             #     print('Inputted value is invalid')
             # try:
@@ -1388,15 +1563,20 @@ class MainWindow(QtWidgets.QMainWindow):
                     dir_1 *= -1
                 dir_2 *= -1
 
+            self.configs.scan_settings["start_time"] = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
+            self.configs.scan_settings["start_time_s"] = time.time_ns() / 1e9
             par_dict["random_order"] = self.scan_parameters_widget.random_order_checkBox.isChecked()
             par_dict["random_approach"] = self.scan_parameters_widget.random_approach_checkBox.isChecked()
-
+            par_dict["random_approach_distance"] = float(self.scan_parameters_widget.random_approach_dist_lineEdit.text())
             if par_dict["random_order"] == True:
                 random.shuffle(self.scanpoint_data)
 
             self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'], self.scanpoint_data[0]['i'],
                                                 self.scanpoint_data[0]['d'], par_dict)
-            self.scan_parameters = par_dict
+
+            for key in par_dict:
+                self.configs.scan_settings[key] = par_dict[key]
+            self.read_misc_configs()
             # print(self.data)
         except ValueError as err:
             print('Inputted value is invalid\n' + str(err))
@@ -1510,24 +1690,18 @@ class MainWindow(QtWidgets.QMainWindow):
     def scan_data_add_point(self, index_tuple, dir_tuple):
         ix, iy, iz = index_tuple
         dir_x, dir_y, dir_z = dir_tuple
+        current_point = np.index_exp[ix * dir_x - (1 if dir_x < 0 else 0),
+                                     iy * dir_y - (1 if dir_y < 0 else 0),
+                                     iz * dir_z - (1 if dir_z < 0 else 0)]
         if self.vna_connected:
             if not self.instr.query_bool("*OPC?"):
                 print("WARNING: data has been read before a sweep finished")
             # TODO: select trace to measure
             data_point = self.query_data(4,raw=True)
-            self.data[ix * dir_x - (1 if dir_x < 0 else 0),
-            iy * dir_y - (1 if dir_y < 0 else 0),
-            iz* dir_z - (1 if dir_z < 0 else 0),:] = data_point
-            self.data_robot_positions[ix * dir_x - (1 if dir_x < 0 else 0),
-            iy * dir_y - (1 if dir_y < 0 else 0),
-            iz * dir_z - (1 if dir_z < 0 else 0)] = self.robot_rdk.robot.setParam("Driver","GET $POS_ACT")
-            self.data_robot_positions_measured[ix * dir_x - (1 if dir_x < 0 else 0),
-            iy * dir_y - (1 if dir_y < 0 else 0),
-            iz * dir_z - (1 if dir_z < 0 else 0)] = self.robot_rdk.robot.setParam("Driver","GET $POS_ACT_MES")
-            self.data_robot_joints[ix * dir_x - (1 if dir_x < 0 else 0),
-                                               iy * dir_y - (1 if dir_y < 0 else 0),
-                                               iz * dir_z - (1 if dir_z < 0 else 0)] = self.robot_rdk.robot.setParam(
-                "Driver", "GET $AXIS_ACT")
+            self.data[current_point][:] = data_point
+            self.data_robot_positions[current_point] = self.robot_rdk.robot.setParam("Driver","GET $POS_ACT")
+            self.data_robot_positions_measured[current_point] = self.robot_rdk.robot.setParam("Driver","GET $POS_ACT_MES")
+            self.data_robot_joints[current_point] = self.robot_rdk.robot.setParam("Driver", "GET $AXIS_ACT")
             # self.data_robot_joint_currents[ix * dir_x - (1 if dir_x < 0 else 0),
             #                                    iy * dir_y - (1 if dir_y < 0 else 0),
             #                                    iz * dir_z - (1 if dir_z < 0 else 0)] = self.robot_rdk.robot.setParam(
@@ -1537,15 +1711,16 @@ class MainWindow(QtWidgets.QMainWindow):
         #     data_point = random.random()
         #     self.freq_arr = np.array([1e9,2e9,3e9])
         #     self.scan_plot_update()
-        current_time = time.time_ns() / 1e9
+        current_time = time.time_ns() / 1e9 - self.configs.scan_settings["start_time_s"]
+        self.data_time[current_point] = current_time
         index_current = (index_tuple[2])*self.data.shape[0]*self.data.shape[1]+ \
                         (index_tuple[1]) * self.data.shape[0] + \
                         (index_tuple[0])
         index_total =np.prod(self.data.shape[:3])
-        if self.scanpoint_index != index_current and not self.scan_parameters["random_order"]:
+        if self.scanpoint_index != index_current and not self.configs.scan_settings["random_order"]:
             print("something went wrong, index mismatched")
         else:
-            if self.scan_parameters["random_order"]:
+            if self.configs.scan_settings["random_order"]:
                 index_current = next(i for i, item in enumerate(self.scanpoint_data) if item["i"] == index_tuple)
             self.scanpoint_index +=1
             if self.scanpoint_index < index_total:
@@ -1571,18 +1746,22 @@ class MainWindow(QtWidgets.QMainWindow):
         elif index_current > 1:
             self.average_time_per_move = np.average(self.delta[1:])
             time_left = (index_total - index_current)*self.average_time_per_move
-            message += f"Time left: {time_left//(60*60):.0f} h {time_left//60:.0f} m {time_left%60:.1f} s"
+            message += f"Time left: {time_left//(60*60):.0f} h {time_left%(60*60)//60:.0f} m {time_left%60:.1f} s"
         self.scan_parameters_widget.message_label.setText(message)
         self.previous_time = current_time
 
     @QtCore.pyqtSlot()
     def robot_scan_finished(self):
-        self.statusbar.setStyleSheet("background-color: green")
         self.robot_busy = False
+        self.change_statusbar_color()
         self.scan_finished = True
 
         current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
-
+        self.configs.scan_settings["end_time"] = current_time
+        self.configs.scan_settings["average_time_per_point"] = self.average_time_per_move
+        time_delta =  (datetime.datetime.strptime(current_time,"%Y_%m_%d_%H-%M-%S")-datetime.datetime.strptime(
+            self.configs.scan_settings["start_time"],"%Y_%m_%d_%H-%M-%S")).total_seconds()
+        self.configs.scan_settings["total_scan_length"] = f"{time_delta//(60*60):.0f} h {time_delta%(60*60)//60:.0f} m {time_delta%60:.1f} s"
         if self.vna_connected:
             np.save(f"robot_pos_{current_time}",self.data_robot_positions)
             np.save(f"robot_pos_meas_{current_time}", self.data_robot_positions_measured)
@@ -1607,48 +1786,148 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.vna_connected:
             self.instr.write("INITiate:IMMediate:ALL")
 
-    def save_data_file(self,filename):
-        np.save(f"{filename}.npy", self.data)
-        pickle.dump(self.scan_coords+[self.freq_arr],open(f"{filename}.pkl","wb"))
+    def read_misc_configs(self):
+        for i in range(self.attr_widget.params_table.rowCount()):
+            attr_item = self.attr_widget.params_table.item(i,0)
+            if attr_item and attr_item.text():
+                self.configs.misc[attr_item.text()] = self.attr_widget.params_table.item(i,1).text()
 
-    def load_data_file(self,filename):
+    def form_filename(self):
+        format_string = self.attr_widget.fname_lineEdit.text()
+        if format_string:
+            self.configs.format_string = format_string
+            format_string = [s.strip(" ") for s in format_string.split(",")]
+            current_attributes = vars(self.configs)
+            # print(current_attributes)
+            attr = {}
+            fname = ""
+            for d in current_attributes:
+                if type(current_attributes[d]) == dict:
+                    attr = {**attr,**current_attributes[d]}
+                else:
+                    attr[d] = current_attributes[d]
+            # print(attr)
+            for s in format_string:
+                if s[0] == "!":
+                    s = s.strip("!")
+                    if s in attr:
+                        fname = fname+"_"+s+"="+str(attr[s])
+                elif s[0] == "#":
+                    s = s.strip("#")
+                    fname = fname +"_"+ s
+                else:
+                    if s in attr:
+                        fname = fname+"_"+str(attr[s])
+            fname=fname.strip("_")
+            return fname
+        else:
+            return ""
+
+    def save_data_file(self,filename):
+        if filename:
+            if type(filename) == tuple and filename[1] == "Numpy binary file (*.npy)":
+                filename = ".".join(filename[0].split(".")[:-1])
+                np.save(f"{filename}.npy", self.data)
+                pickle.dump(self.scan_coords+[self.freq_arr],open(f"{filename}.pkl","wb"))
+                return
+            elif type(filename) == tuple:
+                filename = ".".join(filename[0].split(".")[:-1])
+
+            with h5py.File(f"{filename}.hdf5", 'w') as f:
+                data = f.create_dataset("data", data=self.data, chunks=True,track_order=True)
+                coords = f.create_group("coords",track_order=True)
+                coords.create_dataset("x", data=self.scan_coords[0])
+                coords.create_dataset("y", data=self.scan_coords[1])
+                coords.create_dataset("z", data=self.scan_coords[2])
+                if self.vna_connected or hasattr(self,"freq_arr"):
+                    coords.create_dataset("f", data=self.freq_arr)
+                try:
+                    f.create_dataset("time", data=self.data_time)
+                except AttributeError:
+                    pass
+                try:
+                    for key in self.configs.misc.keys():
+                        data.attrs[key] = self.configs.misc[key]
+                except AttributeError:
+                    pass
+                try:
+                    for key in self.configs.scan_settings.keys():
+                        data.attrs[key] = self.configs.scan_settings[key]
+                    for key in self.configs.robot_settings.keys():
+                        if key not in ["ip","port"]:
+                            data.attrs[key] = self.configs.robot_settings[key]
+                except AttributeError:
+                    pass
+                for key in self.configs.VNA_settings.keys():
+                    if key != "ip":
+                        coords.attrs[key] = self.configs.VNA_settings[key]
+
+                try:
+                    if self.data_robot_positions[0,0] != "":
+                        p1= robot_parse_ASCII_v(self.data_robot_positions)[:,:,:,:-6]
+                        p2 = robot_parse_ASCII_v(self.data_robot_positions_measured)[:,:,:,:-6]
+                        f.create_dataset("pos_act", data=p1)
+                        f.create_dataset("pos_meas", data=p2)
+                        f.create_dataset("pos_err", data=p1-p2)
+                        f.create_dataset("joints", data=robot_parse_ASCII_v(self.data_robot_joints)[:,:,:,:-6])
+                except AttributeError:
+                    pass
+
+
+
+
+    def load_data_file(self,fileinfo):
         # filename = "2024_03_26_21-48-18"
         try:
-            self.data = np.load(f"{filename}.npy")
+            if type(fileinfo) == tuple:
+                filepath, format = fileinfo
+            else:
+                filepath = fileinfo
+            if fileinfo[0]:
+                ext = pathlib.Path(filepath).suffix
 
-            # self.data[:, 1::2] = self.data[::-1, 1::2]
-            # self.data[:,::2] = np.roll(self.data[:,::2],1,axis=0)
-            # self.data[:, 1::2] = np.roll(self.data[:, 1::2], -1, axis=0)
-            # print(self.data[:,:,0,np.argmin(abs(temp_list[3]-91.0))])
-            # np.savetxt("slice.csv",self.data[:, :, 0, np.argmin(abs(temp_list[3] - 91.0))])
+                if ext == ".npy":
+                    print(filepath)
+                    self.data = np.load(filepath)
+                    temp_list = pickle.load(open(pathlib.Path(filepath).with_suffix('.pkl'),"rb"))
+                    self.scan_coords = temp_list[:-1]
+                    self.freq_arr = np.array(temp_list[-1])
+                if ext == ".hdf5":
+                    with h5py.File(filepath, 'r') as f:
+                        if set(["data","coords"]).issubset(f) and set(["x","y","z","f"]).issubset(f["coords"]) :
+                            self.data = f["data"][:]
+                            self.scan_coords = [f["coords"][xi][:] for xi in ["x","y","z"]]
+                            self.freq_arr = f["coords"]["f"][:]
+                        else:
+                            print("File lacks required data")
+                            return
 
-            # self.data = sp.fft.fftshift(sp.fft.fft(self.data, axis=3),axes=3)
-            temp_list = pickle.load(open(f"{filename}.pkl","rb"))
-            print(temp_list)
+                # self.scan_plot_w.checkbox_fft.setChecked(False)
 
-            self.scan_plot_w.checkbox_fft.setChecked(False)
-            self.scan_coords = temp_list[:-1]
-            self.freq_arr = np.array(temp_list[-1])
-            window = sp.signal.windows.hamming
-            window1d1 = window(self.data.shape[0])
-            window1d2 = window(self.data.shape[1])
-            # window2d = np.moveaxis(np.tile(np.moveaxis(np.tile(np.sqrt(np.outer(window1d1, window1d2)),(1,1,self.data.shape[2])),0,-1),(1,1,1,self.data.shape[3])),0,-1)
-            window2d = np.sqrt(np.outer(window1d1, window1d2))
-            data_temp = np.einsum("ij,ijkm->ijkm", window2d, self.data)
-            data_temp = self.data
-            self.data_fft = sp.fft.fftshift(
-                sp.fft.fft2(data_temp, s=(self.data.shape[0] * self.fft_padding, self.data.shape[1] * self.fft_padding), axes=(0, 1)),
-                axes=(0, 1))
-            # self.data_fft = sp.fft.fftshift(
-            #     sp.fft.fft2(data_temp, s=(1024, 1024), axes=(0, 1)),
-            #     axes=(0, 1))
-            self.scan_plot_w.checkbox_fft.setEnabled(True)
-            self.scan_plot_initialize()
-            self.slice_plot_initialize()
-            self.update_coord_slider()
-            self.scan_plot_w.frequency_slider.setRange(0, len(self.freq_arr) - 1)
-            self.scan_plot_w.setEnabled(True)
-            self.slice_plot_w.setEnabled(True)
+                # window = sp.signal.windows.hamming
+                # window1d1 = window(self.data.shape[0])
+                # window1d2 = window(self.data.shape[1])
+                # # window2d = np.moveaxis(np.tile(np.moveaxis(np.tile(np.sqrt(np.outer(window1d1, window1d2)),(1,1,self.data.shape[2])),0,-1),(1,1,1,self.data.shape[3])),0,-1)
+                # window2d = np.sqrt(np.outer(window1d1, window1d2))
+                # data_temp = np.einsum("ij,ijkm->ijkm", window2d, self.data)
+
+                data_temp = self.data
+                self.data_fft = sp.fft.fftshift(
+                    sp.fft.fft2(data_temp, s=(self.data.shape[0] * self.fft_padding, self.data.shape[1] * self.fft_padding), axes=(0, 1)),
+                    axes=(0, 1))
+                # self.data_fft = sp.fft.fftshift(
+                #     sp.fft.fft2(data_temp, s=(1024, 1024), axes=(0, 1)),
+                #     axes=(0, 1))
+                self.trace_plot_initialize()
+                self.scan_plot_w.checkbox_fft.setEnabled(True)
+                self.scan_plot_initialize()
+                self.slice_plot_initialize()
+                self.update_coord_slider()
+                self.scan_plot_w.frequency_slider.setRange(0, len(self.freq_arr) - 1)
+                self.vna_plot_w.setEnabled(True)
+                self.scan_plot_w.setEnabled(True)
+                self.slice_plot_w.setEnabled(True)
+                self.file_widget.update_filename(pathlib.Path(filepath).stem)
         except FileNotFoundError as err:
             print(err)
 
@@ -1699,7 +1978,9 @@ class MainWindow(QtWidgets.QMainWindow):
             l_accel = float(self.robot_controls_widget.robot_lin_accel_lineEdit.text())
             j_speed = float(self.robot_controls_widget.robot_joint_speed_lineEdit.text())
             j_accel = float(self.robot_controls_widget.robot_joint_accel_lineEdit.text())
-            self.robot_rdk.robot.setSpeed(speed_linear=l_speed,accel_linear=l_accel,speed_joints=j_speed,accel_joints=j_accel)
+            speed_dict = {"speed_linear":l_speed,"accel_linear":l_accel,"speed_joints":j_speed,"accel_joints":j_accel}
+            self.configs.robot_settings = {**self.configs.robot_settings, **speed_dict}
+            self.robot_rdk.robot.setSpeed(**speed_dict)
         except ValueError:
             print('Inputted value is invalid')
 
@@ -1718,7 +1999,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.connection_widget.con_robot_pushButton.setText("Disconnect robot")
                 self.connection_widget.con_robot_pushButton.setStyleSheet("background-color: red")
                 self.coord_update_timer.start()
-                self.statusbar.setStyleSheet("background-color: green")
+                self.change_statusbar_color()
                 self.set_robot_speed()
 
                 self.robot_establish_connection()
@@ -1736,7 +2017,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.connection_widget.con_robot_pushButton.setText("Connect robot")
             self.connection_widget.con_robot_pushButton.setStyleSheet("background-color: light gray")
             self.coord_update_timer.stop()
-            self.statusbar.setStyleSheet("background-color: light gray")
+            self.change_statusbar_color()
             # self.worker.de
         for w in (self.manualCTab,self.scan_parameters_widget):
             w.setEnabled(self.robot_connected)
@@ -1769,16 +2050,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.send_robot_to_init.connect(self.worker.restart_after_killswitch)
         self.worker.monitor.restart_signal.connect(self.restart_after_hit)
 
+    def change_statusbar_color(self):
+        if self.robot_connected:
+            if hasattr(self, "worker") and not self.worker.can_move:
+                color = "darkviolet"
+            else:
+                if self.robot_busy:
+                    color = "red"
+                else:
+                    if self.run_on_robot:
+                        color = "green"
+                    else:
+                        color = "yellow"
+        else:
+            color = "light gray"
+        self.statusbar.setStyleSheet("QStatusBar {background-color:" + color + "}")
+
+
 
     @QtCore.pyqtSlot()
     def robot_movement_started(self):
-        self.statusbar.setStyleSheet("background-color: red")
         # print(self.instr.query_bool("*OPC?"))
         self.robot_busy = True
+        self.change_statusbar_color()
     @QtCore.pyqtSlot()
     def robot_movement_finished(self):
-        self.statusbar.setStyleSheet("background-color: green")
         self.robot_busy = False
+        self.change_statusbar_color()
 
     @QtCore.pyqtSlot()
     def process_boundary_hit(self):
@@ -1786,8 +2084,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.can_move = False
         self.robot_controls_widget.position_reset_pushButton.setText("Attempt to reconnect")
         self.scan_parameters_widget.scan_progressbar.setMaximum(0)
-        self.statusbar.setStyleSheet("background-color: darkviolet")
         self.robot_busy = False
+        self.change_statusbar_color()
         # self.worker_thread.quit()
         # if self.robot_connected:
         #     self.robot_connect_button_clicked()
@@ -1795,7 +2093,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.pyqtSlot()
     def restart_after_hit(self):
         self.robot_controls_widget.position_reset_pushButton.setText("Reset robot position")
-        self.statusbar.setStyleSheet("background-color: green")
+        self.change_statusbar_color()
         pass
 
 
@@ -1809,7 +2107,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.connection_widget.con_vna_pushButton.setText("Disconnect VNA")
                 self.connection_widget.con_vna_pushButton.setStyleSheet("background-color: red")
                 self.update_VNA_settings()
-                self.plot_initialize()
+                self.trace_plot_initialize()
             except RsInstrument.RsInstrException:
                 print("no")
                 self.append_log("Connection Failed")
@@ -1845,44 +2143,66 @@ class MainWindow(QtWidgets.QMainWindow):
         if raw:
             data = data[::2] + 1j * data[1::2]
         return data
-    def plot_initialize(self, reset_trace_list = True):
+    def trace_plot_initialize(self, reset_trace_list = True):
 
-        self.vna_plot_w.figure.clear()
+        # self.vna_plot_w.figure.clear()
+        self.vna_plot_w.ax.clear()
 
-        self.ax = self.vna_plot_w.figure.add_subplot(111)
-        self.ax.set_xlabel('Frequency, GHz')
-        self.ax.set_ylabel('S-parameters, dB')
-        list_of_traces = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')
-        list_of_trace_names = self.instr.query_str_stripped("CALCulate:PARameter:CATalog?").split(',')
-        self.dict_of_trace_nums = dict(zip(list_of_traces[1::2],list_of_traces[::2]))
-        self.dict_of_trace_meas = dict(zip(list_of_trace_names[::2], list_of_trace_names[1::2]))
-        if reset_trace_list:
-            self.configs.traces_to_show = list(self.dict_of_trace_nums.keys())
-        # print(self.configs.traces_to_show)
-        self.traces = []
-        for trace in self.configs.traces_to_show:
-            self.traces.append(self.ax.plot(self.freq_arr, self.query_data(self.dict_of_trace_nums[trace]), label=f"{self.dict_of_trace_meas[trace]}")[0])
-        self.ax.legend()
+        self.vna_plot_w.ax.set_ylabel('S-parameters, dB')
+        if self.vna_connected:
+            list_of_traces = self.instr.query_str_stripped("CONFigure:TRACe:CATalog?").split(',')
+            list_of_trace_names = self.instr.query_str_stripped("CALCulate:PARameter:CATalog?").split(',')
+            self.dict_of_trace_nums = dict(zip(list_of_traces[1::2],list_of_traces[::2]))
+            self.dict_of_trace_meas = dict(zip(list_of_trace_names[::2], list_of_trace_names[1::2]))
+            if reset_trace_list:
+                self.configs.traces_to_show = list(self.dict_of_trace_nums.keys())
+            # print(self.configs.traces_to_show)
+            self.traces = []
+            for trace in self.configs.traces_to_show:
+                self.traces.append(self.vna_plot_w.ax.plot(self.freq_arr, self.query_data(self.dict_of_trace_nums[trace]), label=f"{self.dict_of_trace_meas[trace]}")[0])
+            self.vna_plot_w.ax.legend()
+            if reset_trace_list:
+                self.vna_plot_w.traces_toolmenu.clear()       # delete all items from comboBox
+                for trace in list(self.dict_of_trace_meas):
+                    action = self.vna_plot_w.traces_toolmenu.addAction(trace+": "+self.dict_of_trace_meas[trace])
+                    action.setCheckable(True)
+                    action.setChecked(True)
+                    action.toggled.connect(self.change_traces_shown)
+        if hasattr(self, 'data'):
+            self.vna_plot_w.ax.set_ylabel(self.scan_plot_w.plot_format_combobox.currentText()+', '+
+                                          self.vna_plot_w.plot_format_units[self.scan_plot_w.plot_format_combobox.currentText()])
+            self.traces = [self.vna_plot_w.ax.plot(self.freq_arr, np.zeros_like(self.freq_arr),label = "S21")[0]]
+            scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),
+                                                self.scan_plot_w.coordinate_slider.value(), np.index_exp[:][0])
+            self.vna_plot_w.ax.set_ylim(self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data[scan_slice]).min(),
+                                        self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data[scan_slice]).max())
+
         self.vna_plot_w.figure.tight_layout()
 
-        if reset_trace_list:
-            self.vna_plot_w.traces_toolmenu.clear()       # delete all items from comboBox
-            for trace in list(self.dict_of_trace_meas):
-                action = self.vna_plot_w.traces_toolmenu.addAction(trace+": "+self.dict_of_trace_meas[trace])
-                action.setCheckable(True)
-                action.setChecked(True)
-                action.toggled.connect(self.change_traces_shown)
-
-        self.freq_select_vline = self.ax.axvline(self.freq_arr[self.scan_plot_w.frequency_slider.value()],
+        self.freq_select_vline = self.vna_plot_w.ax.axvline(self.freq_arr[min(self.scan_plot_w.frequency_slider.value(),len(self.freq_arr))],
                                                  visible = 1, color = "k")
 
         # refresh canvas
         self.vna_plot_w.canvas.draw()
 
-    def plot_update(self):
+    def trace_plot_update_from_VNA(self):
         """Update the data trace shown on the plot with the one currently on the VNA screen"""
         for i, trace in enumerate(self.traces):
             trace.set_ydata(self.query_data(self.dict_of_trace_nums[self.configs.traces_to_show[i]]))
+
+        self.vna_plot_w.canvas.draw()
+
+    def trace_plot_update_from_datafile(self):
+        """Update the data trace shown on the plot with the one currently on the VNA screen"""
+        scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),self.scan_plot_w.coordinate_slider.value(),np.index_exp[:][0])
+        coord_arr = [self.scan_coords[j] for j in
+                     [self.coord_dict[i] for i in self.scan_plot_w.slice_direction_combobox.currentText()]]
+        data_slice = self.data[scan_slice]
+        data_point = data_slice[np.where(coord_arr[0]==self.scan_plot_w.line_dict[1].get_xdata()[0])[0],\
+               np.where(coord_arr[1]==self.scan_plot_w.line_dict[0].get_ydata()[0])[0],:]
+        formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data_point)
+        for i, trace in enumerate(self.traces):
+            trace.set_ydata(formatted_data)
 
         self.vna_plot_w.canvas.draw()
 
@@ -1893,7 +2213,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if action.isChecked():
                 print(action)
                 self.configs.traces_to_show.append(action.text().split(":")[0])
-        self.plot_initialize(reset_trace_list=False)
+        self.trace_plot_initialize(reset_trace_list=False)
 
     def set_VNA_settings(self):
         try:
@@ -1939,8 +2259,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.instr.write(f'AVERage:COUNt {int(new_averaged_samples)}')
             self.update_VNA_settings()
             self.freq_arr = msgtoarr((self.instr.query('CALC:DATA:STIM?'))) / 1e9
-            self.plot_initialize(reset_trace_list = False)
-            self.plot_initialize(reset_trace_list = False)
+            self.trace_plot_initialize(reset_trace_list = False)
+            self.trace_plot_initialize(reset_trace_list = False)
         except ValueError as err:
             print('Inputted value is invalid\n'+err)
 
@@ -1956,7 +2276,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.configs.VNA_settings["power"] = self.instr.query_int('SOURce:POWer?')
         self.configs.VNA_settings["reversed_sweep"] = self.instr.query_bool('SWEep:REVerse?')
         self.configs.VNA_settings['averaged_samples'] = self.instr.query_int("AVERage:COUNt?")
-        self.configs.VNA_settings["averaging_on/off"] = self.instr.query_bool('AVERage?')
+        self.configs.VNA_settings["averaging"] = self.instr.query_bool('AVERage?')
         # self.VNA_settings.setText(
         #     f"Bandwidth: {str(self.configs.VNA_settings['bandwidth']) + ' Hz' if float(self.configs.VNA_settings['bandwidth']) < 1000 else '{:.0f} kHz'.format(self.configs.VNA_settings['bandwidth'] / 1e3)}  "
         #     f"\nNumber of points: {self.configs.VNA_settings['point_number']} "
@@ -1968,7 +2288,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.vna_parameters_widget.fstp_lineEdit.setText(f'{self.configs.VNA_settings["point_number"]:.4g}')
         self.vna_parameters_widget.pwr_lineEdit.setText(str(self.configs.VNA_settings["power"]))
         self.vna_parameters_widget.fwbw_checkBox.setChecked(self.configs.VNA_settings["reversed_sweep"])
-        self.vna_parameters_widget.avg_checkBox.setChecked(self.configs.VNA_settings["averaging_on/off"])
+        self.vna_parameters_widget.avg_checkBox.setChecked(self.configs.VNA_settings["averaging"])
         self.vna_parameters_widget.avg_num_lineEdit.setText(str(self.configs.VNA_settings["averaged_samples"]))
         self.update_estimated_scan_time()
         self.configs.save_toml("latest_settings.toml")
@@ -1996,7 +2316,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.vna_plot_w.button_step.setText("Step")
 
     def step_plot(self):
-        self.plot_update()
+        self.trace_plot_update_from_VNA()
         if self.toggle_var:
             self.timer.stop()
             self.toggle_var = not self.toggle_var
@@ -2030,7 +2350,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scan_plot_w.ax_scan.set_xlabel(f"Azimuth, degrees")
             self.scan_plot_w.ax_scan.set_ylabel(f"Elevation, degrees")
         scan_slice = self.return_scan_slice(slice_plane,self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
-        self.meshplot = self.scan_plot_w.ax_scan.imshow(formatted_data[scan_slice].T, origin="lower",cmap = ("viridis" if format != "Phase" else "hsv"))
+        self.meshplot = self.scan_plot_w.ax_scan.imshow(formatted_data[scan_slice].T, origin="lower",cmap = "viridis")
         # self.meshplot = self.scan_plot_w.ax_scan.imshow(formatted_data[scan_slice].T,origin ="lower",cmap="jet",vmax=0,vmin=-60)
         d1 = (coord_1.max()-coord_1.min())/(len(coord_1)-1)/2
         d2 = (coord_2.max() - coord_2.min()) / (len(coord_2)-1)/2
@@ -2038,9 +2358,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_plot_extent = extent
         self.meshplot.set_extent(extent)
 
-        self.scan_plot_w.hline = self.scan_plot_w.ax_scan.axhline(0, visible=1, color="k")
-        self.scan_plot_w.vline = self.scan_plot_w.ax_scan.axvline(0, visible=1, color="k")
+        self.scan_plot_w.hline = self.scan_plot_w.ax_scan.axhline(0, visible=1, color="k",zorder = 10)
+        self.scan_plot_w.vline = self.scan_plot_w.ax_scan.axvline(0, visible=1, color="k",zorder = 10)
         self.scan_plot_w.line_dict = {0:self.scan_plot_w.hline,1:self.scan_plot_w.vline}
+
+        self.scan_plot_w.limits = {}
+        for f in self.scan_plot_w.plot_formats.keys():
+            self.scan_plot_w.limits[f] = (self.scan_plot_w.plot_formats[f](data).min(),self.scan_plot_w.plot_formats[f](data).max())
+
+        self.scan_plot_w.figure.colorbar(self.meshplot,orientation = "horizontal",cax=self.scan_plot_w.ax_cb)
 
         self.scan_plot_w.figure.tight_layout()
         self.scan_plot_w.canvas.draw()
@@ -2069,7 +2395,10 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             data = self.data
         scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
+
         k0 = self.freq_arr[self.scan_plot_w.frequency_slider.value()] * 1e9 * 2 * np.pi / const.speed_of_light
+        # kx1 = 2*np.pi*self.scan_coords[0]*1e3/(self.scan_coords[0].max())/abs(self.scan_coords[0][1]-self.scan_coords[0][0])
+        # ky1 = 2*np.pi*self.scan_coords[1]*1e3/(self.scan_coords[1].max())/abs(self.scan_coords[1][1]-self.scan_coords[1][0])
         kx1 = 2*np.pi*self.scan_coords[0]*1e3/(self.scan_coords[0].size)/abs(self.scan_coords[0][1]-self.scan_coords[0][0])**2
         ky1 = 2*np.pi*self.scan_coords[1]*1e3/(self.scan_coords[1].size)/abs(self.scan_coords[1][1]-self.scan_coords[1][0])**2
         if self.scan_plot_w.checkbox_backpropagation.isChecked():
@@ -2090,6 +2419,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 data_slice = sp.fft.ifft2(sp.fft.ifftshift(data_slice))
         else:
             data_slice = data[scan_slice]
+        if self.scan_plot_w.checkbox_norm.isChecked():
+            data_slice = data_slice/np.abs(data[scan_slice]).max()
         if self.scan_plot_w.checkbox_fft.isChecked():
             if np.any(abs(kx1) > k0) or np.any(abs(ky1) > k0):
                 ang_x = np.degrees(np.arcsin((kx1%(k0*((kx1<0)*-2+1)))/k0))+90*np.sign(kx1)*(abs(kx1)//k0)
@@ -2101,6 +2432,7 @@ class MainWindow(QtWidgets.QMainWindow):
             d2 = (ang_y.max() - ang_y.min()) / (len(ang_y) - 1) / 2
             extent = [ang_x.min() - d1, ang_x.max() + d1, ang_y.min() - d2, ang_y.max() + d2]
             self.meshplot.set_extent(extent)
+            #TODO self.sliceplot.set_xdata(ang_x)
         else:
             self.meshplot.set_extent(self.scan_plot_extent)
         formatted_data = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](data_slice)
@@ -2114,6 +2446,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 title += f" at {self.scan_plot_w.backpropagation_distance_slider.value()/1e3:.3f} m"
         self.scan_plot_w.ax_scan.set_title(title)
         self.meshplot.autoscale()
+        # self.meshplot.set_clim(self.scan_plot_w.limits[self.scan_plot_w.plot_format_combobox.currentText()])
         self.scan_plot_w.canvas.draw()
 
     def set_slider(self, value, slider):
@@ -2128,10 +2461,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # print(self.textfield_frequency_slider.value())
         self.new_frequency = self.freq_arr[self.scan_plot_w.frequency_slider.value()]
         self.scan_plot_w.frequency_textfield.setText(f"{self.new_frequency:.2f}")
-        if self.vna_connected:
+        if self.vna_plot_w.isEnabled():
             self.freq_select_vline.set_xdata([self.new_frequency, self.new_frequency])
+            self.vna_plot_w.canvas.draw()
         # self.new_frequency_index = self.find_nearest_frequency_point(self.new_frequency)
-        self.vna_plot_w.canvas.draw()
         self.scan_plot_update()
         self.slice_plot_update()
 
@@ -2202,6 +2535,11 @@ class MainWindow(QtWidgets.QMainWindow):
             data_sim = data_sim*np.abs(data[scan_slice]).max()/self.int_norm
             self.int_sliceplot, = self.slice_plot_w.ax_slice.plot(coords,format_function(data_sim),label = "Simulated")
         self.slice_plot_w.ax_slice.legend()
+        coords2 = self.scan_coords[self.coord_dict[
+            self.scan_plot_w.slice_direction_combobox.currentText()[
+            self.slice_plot_w.slice_directions[
+                self.slice_plot_w.slice_direction_combobox.currentText()]-1]]]
+        self.slice_plot_w.coordinate_slider.setValue(len(coords2) // 2)
 
 
     def slice_plot_update(self):
@@ -2215,14 +2553,30 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             data = self.data
         format_function = self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()]
-        formatted_data = format_function(data[scan_slice])
+        if not self.scan_plot_w.checkbox_norm.isChecked():
+            formatted_data = format_function(data[scan_slice])
+        else:
+            formatted_data = format_function(data[scan_slice] / np.abs(data[scan_slice]).max())
+        self.trace_plot_update_from_datafile()
         if len(formatted_data[scan_slice_2]) == len(self.sliceplot.get_ydata()):
             self.sliceplot.set_ydata(formatted_data[scan_slice_2])
             if self.sim_data_available:
                 self.interpolator = self.sim_interp_list[
                     np.argmin(abs(self.sim_freq_list - self.freq_arr[scan_slice[3]]))]
                 self.int_norm = np.abs(self.interpolator(self.int_grid[1], self.int_grid[0])).max()
-                self.int_sliceplot.set_ydata(format_function(self.interpolator(self.int_grid[1][scan_slice_2],self.int_grid[0][scan_slice_2])*(np.abs(data[scan_slice]).max()/self.int_norm)))
+                if not self.scan_plot_w.checkbox_norm.isChecked():
+                    self.int_sliceplot.set_ydata(format_function(self.interpolator(self.int_grid[1][scan_slice_2],self.int_grid[0][scan_slice_2])*(np.abs(data[scan_slice]).max()/self.int_norm)))
+                else:
+                    self.int_sliceplot.set_ydata(format_function(self.interpolator(self.int_grid[1][scan_slice_2],self.int_grid[0][scan_slice_2])/self.int_norm))
+            title = f" at {self.freq_arr[self.scan_plot_w.frequency_slider.value()]} GHz"
+            if (self.scan_plot_w.checkbox_fft.isChecked()):
+                title = self.scan_plot_w.plot_format_combobox.currentText() + " of the fourier image" + title
+            else:
+                title = self.scan_plot_w.plot_format_combobox.currentText() + title
+                # if (self.scan_plot_w.checkbox_backpropagation.isChecked()):
+                #     title += f" at {self.scan_plot_w.backpropagation_distance_slider.value() / 1e3:.3f} m"
+            slice_coord = self.scan_plot_w.slice_direction_combobox.currentText()[self.slice_plot_w.slice_directions[self.slice_plot_w.slice_direction_combobox.currentText()]]
+            self.slice_plot_w.ax_slice.set_title(f"Slice along {slice_coord} of "+title)
             try:
                 self.slice_plot_w.ax_slice.set_ylim(np.nanmin(formatted_data), np.nanmax(formatted_data))
             except ValueError:
@@ -2230,6 +2584,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.slice_plot_w.canvas.draw()
         else:
             self.slice_plot_initialize()
+
 
 
     def initialize_connectionTab(self):
@@ -2264,6 +2619,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for ic, coord in enumerate(coordinates_list):
             for iw, widget in enumerate(self.coordinates_widgets_list[ic].getwidgets()):
                 self.man_move_gridLayout.addWidget(widget, 1+ic,iw,1,1)
+            self.coordinates_widgets_list[ic].step_lineEdit.setText(str([5,1][ic//3]))
 
         self.man_select_label = QtWidgets.QLabel()
         self.man_select_label.setStyleSheet("font-weight: bold")
@@ -2271,27 +2627,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.man_select_label.setMaximumHeight(30)
         self.man_step_label = QtWidgets.QLabel()
         self.man_step_label.setStyleSheet("font-weight: bold")
-        self.man_move_gridLayout.addWidget(self.man_step_label, 0, 2, 1, 1)
+        self.man_move_gridLayout.addWidget(self.man_step_label, 0, 1, 1, 1)
         self.man_pos_label = QtWidgets.QLabel()
         self.man_pos_label.setStyleSheet("font-weight: bold")
-        self.man_move_gridLayout.addWidget(self.man_pos_label, 0, 3, 1, 1)
-        self.man_input_label = QtWidgets.QLabel()
-        self.man_input_label.setStyleSheet("font-weight: bold")
-        self.man_move_gridLayout.addWidget(self.man_input_label, 0, 7, 1, 1)
+        self.man_move_gridLayout.addWidget(self.man_pos_label, 0, 2, 1, 2)
+        # self.man_input_label = QtWidgets.QLabel()
+        # self.man_input_label.setStyleSheet("font-weight: bold")
+        # self.man_move_gridLayout.addWidget(self.man_input_label, 0, 4, 1, 1)
         self.man_pos_fdbk_label = QtWidgets.QLabel()
         self.man_pos_fdbk_label.setStyleSheet("font-weight: bold")
-        self.man_move_gridLayout.addWidget(self.man_pos_fdbk_label, 0, 8, 1, 1)
+        self.man_move_gridLayout.addWidget(self.man_pos_fdbk_label, 0, 4, 1, 1)
         self.man_pos_real_fdbk_label = QtWidgets.QLabel()
         self.man_pos_real_fdbk_label.setStyleSheet("font-weight: bold")
-        self.man_move_gridLayout.addWidget(self.man_pos_real_fdbk_label, 0, 10, 1, 1)
+        self.man_move_gridLayout.addWidget(self.man_pos_real_fdbk_label, 0, 5, 1, 1)
 
-        self.man_step_label.setText("Step size")
-        self.man_pos_label.setText("Position Selection")
-        self.man_select_label.setText("Movement Selection")
-        self.man_pos_fdbk_label.setText("Position feedback")
-        self.man_pos_real_fdbk_label.setText("Position accuracy")
-        self.man_input_label.setText("Manual In")
-
+        self.man_step_label.setText("Step\nsize")
+        self.man_pos_label.setText("Position\ncontrol")
+        self.man_select_label.setText("Coordinate\nselection")
+        self.man_pos_fdbk_label.setText("Position\nfeedback")
+        self.man_pos_real_fdbk_label.setText("Position\naccuracy")
+        # self.man_input_label.setText("Manual\nIn")
+        #
 
         self.man_main_VLayout.addLayout(self.man_move_gridLayout)
 
@@ -2320,9 +2676,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.xyzS_VLayout.addWidget(self.scan_type_combobox)
         spacerItem3 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
                                             QtWidgets.QSizePolicy.Policy.Expanding)
+        self.attr_widget = AttributeWidget()
+        self.xyzS_VLayout.addWidget(self.attr_widget)
         self.file_widget = DataFileWidget()
         self.xyzS_VLayout.addWidget(self.file_widget)
         self.xyzS_VLayout.addItem(spacerItem3)
+
 
         self.vna_parameters_widget = VNAParametersWidget()
         self.xyzS_VLayout.addWidget(self.vna_parameters_widget)
@@ -2333,10 +2692,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.feedback_widget = FeedbackWidget()
         self.log = LogWidget()
 
-        self.xyzS_HLayout.addWidget(self.robot_start_widget)
-        self.xyzS_HLayout.addWidget(self.feedback_widget)
-        self.xyzS_HLayout.addWidget(self.log)
-        self.xyzS_VLayout.addLayout(self.xyzS_HLayout)
+        # self.xyzS_HLayout.addWidget(self.robot_start_widget)
+        # self.xyzS_HLayout.addWidget(self.feedback_widget)
+        # self.xyzS_HLayout.addWidget(self.log)
+        # self.xyzS_VLayout.addLayout(self.xyzS_HLayout)
 
 
         self.gridLayout_6.addLayout(self.xyzS_VLayout,0,0,1,1)
@@ -2358,7 +2717,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mainTabWidget = QtWidgets.QTabWidget(parent=self.centralwidget)
 
         self.connectionTab = self.initialize_connectionTab()
-        self.mainTabWidget.addTab(self.connectionTab, "")
+        # self.mainTabWidget.addTab(self.connectionTab, "")
 
         self.manualCTab = self.initialize_manualCTab()
         self.mainTabWidget.addTab(self.manualCTab, "")
@@ -2366,7 +2725,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scanTab = self.initialize_scanTab()
         self.mainTabWidget.addTab(self.scanTab, "")
 
-        self.mainTabWidget.setTabText(self.mainTabWidget.indexOf(self.connectionTab), "Connection")
+        # self.mainTabWidget.setTabText(self.mainTabWidget.indexOf(self.connectionTab), "Connection")
         self.mainTabWidget.setTabText(self.mainTabWidget.indexOf(self.manualCTab),"Manual Control")
         self.mainTabWidget.setTabText(self.mainTabWidget.indexOf(self.scanTab), "Scanning")
 
@@ -2398,21 +2757,34 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
         self.menubar.setGeometry(QtCore.QRect(0, 0, 1624, 22))
-        self.menuSettings = QtWidgets.QMenu(parent=self.menubar)
-        self.menuHelp = QtWidgets.QMenu(parent=self.menubar)
-        MainWindow.setMenuBar(self.menubar)
         self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
+        self.statusbar.addPermanentWidget(RobotStopButton())
+        self.statusbar.setLayoutDirection(QtCore.Qt.LayoutDirection.RightToLeft)
         MainWindow.setStatusBar(self.statusbar)
-        self.menuSettings.setTitle("Settings")
-        self.menuHelp.setTitle("Help")
 
-        self.actionReset = QtGui.QAction(parent=MainWindow)
-        self.actionClose = QtGui.QAction(parent=MainWindow)
-        self.actionAbout = QtGui.QAction(parent=MainWindow)
+        self.menuConnection = QtWidgets.QMenu(parent=self.menubar)
+        self.menuRobotMode = QtWidgets.QMenu(parent=self.menubar)
+        MainWindow.setMenuBar(self.menubar)
+        self.menuConnection.setTitle("Connection")
+        self.menuRobotMode.setTitle("Robot mode")
 
-        self.actionReset.setText("Reset")
-        self.actionClose.setText("Close")
-        self.actionAbout.setText("About")
+        self.actionConnectRobot = QtGui.QAction(parent=MainWindow)
+        self.actionConnectVNA = QtGui.QAction(parent=MainWindow)
+        self.actionDisconnectBoth = QtGui.QAction(parent=MainWindow)
+        self.actionSimulation = QtGui.QAction(parent=MainWindow)
+        self.actionRunOnRobot = QtGui.QAction(parent=MainWindow)
+
+        self.actionConnectRobot.setText("Connect robot")
+        self.actionConnectVNA.setText("Connect VNA")
+        self.actionDisconnectBoth.setText("Disconnect both")
+        self.actionSimulation.setText("Run in simulation")
+        self.actionRunOnRobot.setText("Run on robot")
+
+        self.actionConnectRobot.triggered.connect(self.robot_connect_button_clicked)
+        self.actionConnectVNA.triggered.connect(self.vna_connect_button_clicked)
+        self.actionDisconnectBoth.triggered.connect(self.stop_button_clicked)
+        self.actionSimulation.triggered.connect(self.run_program_in_sim)
+        self.actionRunOnRobot.triggered.connect(self.run_program_on_robot)
 
         # self.indicatorLed = QtWidgets.QLabel()
         # self.statusbar.setAutoFillBackground(True)
@@ -2420,11 +2792,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusbar.setStyleSheet("background-color: light gray")
         # self.indicatorLed.setText("None")
 
-        self.menuSettings.addAction(self.actionReset)
-        self.menuSettings.addAction(self.actionClose)
-        self.menuHelp.addAction(self.actionAbout)
-        self.menubar.addAction(self.menuSettings.menuAction())
-        self.menubar.addAction(self.menuHelp.menuAction())
+        self.menuConnection.addAction(self.actionConnectRobot)
+        self.menuConnection.addAction(self.actionConnectVNA)
+        self.menuConnection.addAction(self.actionDisconnectBoth)
+        self.menuRobotMode.addAction(self.actionSimulation)
+        self.menuRobotMode.addAction(self.actionRunOnRobot)
+        self.menubar.addAction(self.menuConnection.menuAction())
+        self.menubar.addAction(self.menuRobotMode.menuAction())
         # self.statusbar.addWidget(self.indicatorLed)
 
         MainWindow.setWindowTitle("Main Window")
