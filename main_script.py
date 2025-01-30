@@ -195,6 +195,7 @@ class RobotMovementObject(QtCore.QObject):
                                                           z=distance - abs(r * np.cos(np.deg2rad(theta))),
                                                           rx=theta * np.sin(np.deg2rad(phi)), ry=-theta * np.cos(np.deg2rad(phi))))
             self.rdk_instance.target_scan.setPose(new_pose)
+            self.moveJointsSafe(new_pose, lin=(scan_type == scan_type_list[0]))
             if settings["random_approach"]:
                 random_step = settings["random_approach_distance"]
                 # self.moveJointsSafe(new_pose* (robomath.eye().Offset((random.random()-0.5)*random_step, (random.random()-0.5)*random_step, 0)), lin=(scan_type == scan_type_list[0]))
@@ -1762,12 +1763,12 @@ class MainWindow(QtWidgets.QMainWindow):
         time_delta =  (datetime.datetime.strptime(current_time,"%Y_%m_%d_%H-%M-%S")-datetime.datetime.strptime(
             self.configs.scan_settings["start_time"],"%Y_%m_%d_%H-%M-%S")).total_seconds()
         self.configs.scan_settings["total_scan_length"] = f"{time_delta//(60*60):.0f} h {time_delta%(60*60)//60:.0f} m {time_delta%60:.1f} s"
-        if self.vna_connected:
-            np.save(f"robot_pos_{current_time}",self.data_robot_positions)
-            np.save(f"robot_pos_meas_{current_time}", self.data_robot_positions_measured)
-            np.save(f"robot_joints_{current_time}", self.data_robot_joints)
+        # if self.vna_connected:
+            # np.save(f"robot_pos_{current_time}",self.data_robot_positions)
+            # np.save(f"robot_pos_meas_{current_time}", self.data_robot_positions_measured)
+            # np.save(f"robot_joints_{current_time}", self.data_robot_joints)
             # np.save(f"robot_joint_currents_{current_time}", self.data_robot_joint_currents)
-            self.configs.save_toml(f"{current_time}.toml")
+            # self.configs.save_toml(f"{current_time}.toml")
 
         if self.vna_connected:
             self.slice_plot_initialize()
@@ -1966,11 +1967,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_rdk.run_on_robot(self.configs.robot_settings['ip'],
                                                  self.configs.robot_settings['port'])
         self.set_robot_speed()
+        self.change_statusbar_color()
 
 
     def run_program_in_sim(self):
         self.run_on_robot = False
         self.robot_rdk.setRunMode(1)  #  RUNMODE_SIMULATE = 1
+        self.change_statusbar_color()
 
     def set_robot_speed(self):
         try:
