@@ -34,7 +34,8 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 SAVE_ON_SCAN_END = False
 scan_type_dict = {"XYZ scan":("X","Y","Z"),"Ludwig 2: AE":("Az","El","R"),
-              "Angular sweep":("Az","El","R"),"Ludwig 3":("θ","φ","R"),}
+              "Angular sweep":("Az","El","R"),"Ludwig 3":("θ","φ","R"),"Ludwig 2: EA":("Az","El","R"),
+                "Rotate sample":("Az","Alpha","R")}
 scan_type_list = list(scan_type_dict.keys())
 
 robot_parse_ASCII = lambda x: np.array([float(y.split()[-1]) for y in x.strip('{}').split(",")])
@@ -124,11 +125,12 @@ def movement_wrapper_robot_internal(f, ):
 
 
 class RobotMovementObject(QtCore.QObject):
-    arrived_at_point = QtCore.pyqtSignal(tuple,tuple)
+    arrived_at_point = QtCore.pyqtSignal(tuple,tuple,bool)
     began_movement = QtCore.pyqtSignal()
     finished_movement = QtCore.pyqtSignal()
     finished_scan = QtCore.pyqtSignal()
     ready_for_acquisition = QtCore.pyqtSignal()
+    rotate_sample = QtCore.pyqtSignal(float)
     def __init__(self):
         super(RobotMovementObject, self).__init__()
         # self.movement_lock = threading.Lock()
@@ -144,11 +146,12 @@ class RobotMovementObject(QtCore.QObject):
         self.settle_time = 0
         self.acquisition_time = 0
         self.E_plane = 0
+        self.E_plane_direction = -1
 
     @QtCore.pyqtSlot(bool)
     def set_plane(self,E_plane = False):
         if E_plane:
-            self.rdk_instance.robot.setPoseTool(self.rdk_instance.default_pose_tool*robomath.rotz(np.pi/2))
+            self.rdk_instance.robot.setPoseTool(self.rdk_instance.default_pose_tool*robomath.rotz(-np.pi/2*self.E_plane_direction))
             self.E_plane = 1
         else:
             self.rdk_instance.robot.setPoseTool(self.rdk_instance.default_pose_tool)
@@ -157,7 +160,7 @@ class RobotMovementObject(QtCore.QObject):
     @QtCore.pyqtSlot(float,float,float,float)
     def rotate_pose_tool(self,phi,az,el,z_phc):
         if self.E_plane:
-            pose_tool = self.rdk_instance.default_pose_tool*robomath.rotz(np.pi/2)
+            pose_tool = self.rdk_instance.default_pose_tool*robomath.rotz(np.pi/2*self.E_plane_direction)
         else:
             pose_tool = self.rdk_instance.default_pose_tool
         self.rdk_instance.robot.setPoseTool(pose_tool.Offset(0,0,z_phc)*robomath.rotz(np.deg2rad(phi))*robomath.roty(np.deg2rad(az))*robomath.rotx(np.deg2rad(el)))
@@ -165,7 +168,7 @@ class RobotMovementObject(QtCore.QObject):
     @QtCore.pyqtSlot(tuple,tuple,tuple,dict)
     @movement_wrapper_robot_internal
     def move_robot_to_point_scan(self,coord_tuple=None, index_tuple=None,
-                                 dir_tuple=None, settings= {"scan_type": scan_type_list[0],"distance":1850,"random_approach":False}):
+                                 dir_tuple=None, settings= {"scan_type": scan_type_list[0],"distance":0,"random_approach":False,"initial":False}):
         if coord_tuple != None:
             self.began_movement.emit()
             scan_type = settings["scan_type"]
@@ -184,7 +187,7 @@ class RobotMovementObject(QtCore.QObject):
                 new_pose = self.rdk_instance.target_scan_init.Pose() * \
                            (robomath.eye().Offset(x=r * np.sin(np.deg2rad(azimuth)), y=r * np.sin(np.deg2rad(elevation)),
                                                   z=distance - abs(r * np.cos(np.deg2rad(azimuth)) * np.cos(np.deg2rad(elevation))),
-                                                  rx=elevation, ry=-azimuth))
+                                                  rx=0, ry=-azimuth))*robomath.eye().Offset(x=0,y=0,z=0,rx=elevation)
             if scan_type == scan_type_list[3]:
                 theta, phi, r = coord_tuple
                 distance = settings["distance"]
@@ -194,21 +197,58 @@ class RobotMovementObject(QtCore.QObject):
                                                           y=r * np.sin(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
                                                           z=distance - abs(r * np.cos(np.deg2rad(theta))),
                                                           rx=theta * np.sin(np.deg2rad(phi)), ry=-theta * np.cos(np.deg2rad(phi))))
+
+            if scan_type == scan_type_list[4]:
+                azimuth, elevation, r = coord_tuple
+                distance = settings["distance"]
+                if scan_type == scan_type_list[2]:
+                    r = 0
+                    distance = 0
+                r = (distance-r)
+                new_pose = self.rdk_instance.target_scan_init.Pose() * \
+                           (robomath.eye().Offset(x=r * np.sin(np.deg2rad(azimuth)), y=r * np.sin(np.deg2rad(elevation)),
+                                                  z=distance - abs(r * np.cos(np.deg2rad(azimuth)) * np.cos(np.deg2rad(elevation))),
+                                                  rx=elevation, ry=-azimuth))
+
+            if scan_type == "Rotate sample":
+                azimuth, alpha, r = coord_tuple
+                distance = settings["distance"]
+                r = (distance - r)
+                self.rotate_sample.emit(alpha)
+                new_pose = self.rdk_instance.target_scan_init.Pose() * \
+                           (robomath.eye().Offset(x=r * np.sin(np.deg2rad(azimuth)),
+                                                  y=0,
+                                                  z= distance - abs(
+                                                      r * np.cos(np.deg2rad(azimuth))),
+                                                  rx=0, ry=-azimuth)) * robomath.eye().Offset(x=0, y=0, z=0)
+
             self.rdk_instance.target_scan.setPose(new_pose)
-            self.moveJointsSafe(new_pose, lin=(scan_type == scan_type_list[0]))
+            # if not settings["initial"]:
+            #     self.moveJointsSafe(new_pose, lin=(scan_type == scan_type_list[0]))
+            # else:
+            #     self.moveJointsSafe(new_pose, lin=False)
+
+            moved_successfully = self.moveJointsSafe(new_pose, lin=False)
+            # self.moveJointsSafe(new_pose, lin=(scan_type == scan_type_list[0]))
             if settings["random_approach"]:
                 random_step = settings["random_approach_distance"]
                 # self.moveJointsSafe(new_pose* (robomath.eye().Offset((random.random()-0.5)*random_step, (random.random()-0.5)*random_step, 0)), lin=(scan_type == scan_type_list[0]))
                 rand_ang = random.random() * np.pi * 2
-                self.moveJointsSafe(new_pose* (robomath.eye().Offset(np.cos(rand_ang)*random_step, np.sin(rand_ang)*random_step, 0)), lin=(scan_type == scan_type_list[0]))
+                # self.moveJointsSafe(new_pose* (robomath.eye().Offset(np.cos(rand_ang)*random_step, np.sin(rand_ang)*random_step, 0)), lin=(scan_type == scan_type_list[0]))
+                # self.moveJointsSafe(new_pose, lin=(scan_type == scan_type_list[0]))
 
-            self.moveJointsSafe(new_pose,lin= (scan_type==scan_type_list[0]))
+                self.moveJointsSafe(new_pose* (robomath.eye().Offset(np.cos(rand_ang)*random_step, np.sin(rand_ang)*random_step, 0)), lin=False)
+                moved_successfully = self.moveJointsSafe(new_pose, lin=False)
+
+            # self.moveJointsSafe(new_pose,lin= (scan_type==scan_type_list[0]))
             # self.moveJointsSafe(new_pose, lin= False)
             # self.moveJointsSafe(new_pose, lin=0)
-            time.sleep(self.settle_time)
+            if moved_successfully:
+                time.sleep(self.settle_time)
             self.ready_for_acquisition.emit()
-            time.sleep(self.acquisition_time)
-            self.arrived_at_point.emit(index_tuple, dir_tuple)
+            if moved_successfully:
+                time.sleep(self.acquisition_time)
+            self.arrived_at_point.emit(index_tuple, dir_tuple,not moved_successfully)
             self.finished_movement.emit()
 
     # @QtCore.pyqtSlot(tuple,tuple,tuple)
@@ -241,11 +281,11 @@ class RobotMovementObject(QtCore.QObject):
     #         self.arrived_at_point.emit(index_tuple, dir_tuple)
     #         self.finished_movement.emit()
 
-    def moveJointsSafe(self, new_pose, lin = False):
+    def moveJointsSafe(self, new_pose, lin = False, verbose = False):
         if len(self.rdk_instance.robot.SolveIK(new_pose, tool=self.rdk_instance.robot.PoseTool()).tolist()) == 6:
             config = np.squeeze(
                 self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints())[:3]).tolist()
-            config[-1] = -1
+            # config[-1] = -1
             # print(config)
             joints = robolinkutils.SolveIK_Conf(self.rdk_instance.robot, new_pose,
                                                 toolpose=self.rdk_instance.robot.PoseTool(), joint_config=config)
@@ -261,30 +301,34 @@ class RobotMovementObject(QtCore.QObject):
                 return
 
 
-            if any(((j4_diff+j6_diff)<360) * (j6_diff<360)):
+            if any((abs(j4_diff+j6_diff)<300) * (abs(j6_diff)<300) * (abs(j4_diff)<180)):
 
                 # diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.robot.Joints())[:, :6],
                 #                                           (len(joints), 1))
-                diff = diff[((j4_diff+j6_diff)<360) * (j6_diff<360)]
+                diff = diff[(abs(j4_diff+j6_diff)<300) * (abs(j6_diff)<300) * (abs(j4_diff)<180)]
                 # print(diff[np.linalg.norm(diff, axis=1).argmin()])
                 best_config = diff[np.linalg.norm(diff, axis=1).argmin()]
                 # if len(np.unique(np.linalg.norm(diff, axis=1)))<len(np.linalg.norm(diff, axis=1)):
                 #     print("Several optimal poses might have been found")
                     # diff = diff[np.sign(diff[:,-1]) == np.sign(diff[:,-3])]
-                # print('pose ', new_pose)
-                # print('difference ',diff)
-                # print('difference norm ', np.linalg.norm(diff, axis=1))
-                # print(np.linalg.norm(diff, axis=1).argmin())
-                # print('joints ', joints)
-                # print('best ',best_config)
+                if verbose:
+                    print('pose ', new_pose)
+                    print('difference ',diff)
+                    print('difference norm ', np.linalg.norm(diff, axis=1))
+                    print(np.linalg.norm(diff, axis=1).argmin())
+                    print('joints ', joints)
+                    print('best ',best_config)
                 if lin:
                     self.rdk_instance.robot.MoveL(joints[np.linalg.norm(diff, axis=1).argmin()])
                 else:
                     self.rdk_instance.robot.MoveJ(joints[np.linalg.norm(diff, axis=1).argmin()])
+                return True
             else:
                 print("No suitable configuration found")
+                return False
         else:
             print("Target coordinates are inaccessible at ", robomath.Pose_2_KUKA(new_pose))
+            return False
 
     @QtCore.pyqtSlot(tuple)
     @movement_wrapper_robot_internal
@@ -344,6 +388,70 @@ class RobotMovementObject(QtCore.QObject):
     @QtCore.pyqtSlot()
     def talk(self):
         print('yooooooo')
+
+class SampleHolderObject(RobotMovementObject):
+    def __init__(self, sh_dict):
+        super(SampleHolderObject, self).__init__()
+        self.rdk_instance = RDK_KUKA(sample_holder_args=sh_dict)
+
+    def moveJointsSafeSH(self, new_pose, lin = False,verbose = False):
+        if len(self.rdk_instance.sample_holder.SolveIK(new_pose, tool=self.rdk_instance.sample_holder.PoseTool()).tolist()) == 6:
+            config = np.squeeze(
+                self.rdk_instance.sample_holder.JointsConfig(self.rdk_instance.target_holder_init.Joints())[:3]).tolist()
+            # config[-1] = -1
+            # print(config)
+            joints = robolinkutils.SolveIK_Conf(self.rdk_instance.sample_holder, new_pose,
+                                                toolpose=self.rdk_instance.sample_holder.PoseTool(), joint_config=config)
+            # print(self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints()))
+            # self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
+            if len(joints) > 0:
+                diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.target_holder_init.Joints())[:, :6],
+                                                          (len(joints), 1))
+                j6_diff = diff[:,-1]
+                j4_diff = diff[:, -3]
+            else:
+                print("No suitable configuration found")
+                return
+
+            if any((abs(j4_diff + j6_diff) < 300) * (abs(j6_diff) < 300) * (abs(j4_diff) < 180)):
+
+                # diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.robot.Joints())[:, :6],
+                #                                           (len(joints), 1))
+                diff = diff[(abs(j4_diff + j6_diff) < 300) * (abs(j6_diff) < 300) * (abs(j4_diff) < 180)]
+                # print(diff[np.linalg.norm(diff, axis=1).argmin()])
+                best_config = diff[np.linalg.norm(diff, axis=1).argmin()]
+                # if len(np.unique(np.linalg.norm(diff, axis=1)))<len(np.linalg.norm(diff, axis=1)):
+                #     print("Several optimal poses might have been found")
+                # diff = diff[np.sign(diff[:,-1]) == np.sign(diff[:,-3])]
+                if verbose:
+                    print('pose ', new_pose)
+                    print('difference ', diff)
+                    print('difference norm ', np.linalg.norm(diff, axis=1))
+                    print(np.linalg.norm(diff, axis=1).argmin())
+                    print('joints ', joints)
+                    print('best ', best_config)
+                if lin:
+                    self.rdk_instance.sample_holder.MoveL(joints[np.linalg.norm(diff, axis=1).argmin()])
+                else:
+                    self.rdk_instance.sample_holder.MoveJ(joints[np.linalg.norm(diff, axis=1).argmin()])
+                return True
+            else:
+                print("No suitable configuration found")
+                return False
+        else:
+            print("Target coordinates are inaccessible at ", robomath.Pose_2_KUKA(new_pose))
+            return False
+
+    @QtCore.pyqtSlot(float)
+    @movement_wrapper_robot_internal
+    def rotate_sample_by_angle(self, alpha):
+        new_pose = self.rdk_instance.target_holder_rot_init.Pose() * (robomath.eye().Offset(x=0,
+                                                  y=0,
+                                                  z= 0,
+                                                  rx=alpha, ry=0)) * robomath.eye().Offset(x=0, y=0, z=0)
+        self.rdk_instance.target_holder_rot.setPose(new_pose)
+        self.moveJointsSafeSH(new_pose)
+
 
 def msgtoarr(s):
     return np.fromstring(s, sep=',')
@@ -799,10 +907,11 @@ class ScanParametersWidget(QtWidgets.QWidget):
 
         size_policy = QtWidgets.QSizePolicy()
         self.setSizePolicy(size_policy)
+        self.radial_distance = 0
 
         self.set_scan(type)
 
-    def set_scan(self,scan_type, distance = 1850):
+    def set_scan(self,scan_type):
         coordinates = ["X1", "X2", "X3"]
         if scan_type in scan_type_list:
             coordinates = scan_type_dict[scan_type]
@@ -827,10 +936,10 @@ class ScanParametersWidget(QtWidgets.QWidget):
             # if ir == 2 and scan_type in scan_type_list[1:4]:
             #     row[1].setText(f"{distance}")
 
-        if scan_type in scan_type_list[1:4]:
+        if scan_type in scan_type_list[1:6]:
             row = self.extra_params_w_list
             row[0].setText("Distance")
-            row[1].setText(f"{distance}")
+            row[1].setText(f"{self.radial_distance}")
             row[0].setVisible(True)
             row[1].setVisible(True)
         else:
@@ -1161,7 +1270,8 @@ class PlotWidget(QtWidgets.QWidget):
         # self.plot_formats = {"Magnitude": abs, "Phase": lambda x: np.degrees(np.angle(x)), "Mag dB": lambda x: 20 * np.log10(np.abs(x)),
         #                      "Real": np.real, "Imaginary": np.imag}
         self.plot_formats = {"Magnitude": abs,
-                             "Phase": lambda x: np.degrees(np.angle(x*np.exp(1j*(np.pi-np.angle(x)[x.shape[0]//2,x.shape[1]//2]-15/180*np.pi)))),
+                             # "Phase": lambda x: np.degrees(np.angle(x*np.exp(1j*(np.pi-np.angle(x)[x.shape[0]//2,x.shape[1]//2]-15/180*np.pi)))),
+                             "Phase": lambda x: np.degrees(np.angle(x)),
                              "Mag dB": lambda x: 20 * np.log10(np.abs(x)),
                              "Real": np.real, "Imaginary": np.imag}
         self.plot_format_units = {"Magnitude": "mW", "Phase": "degrees", "Mag dB": "dBm",
@@ -1303,6 +1413,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
         self.configs = Config("aaa.toml")
+        # self.configs = Config("orange.toml")
         self.setAcceptDrops(True)
         self.setupUi(self)
         self.setWindowIcon(QtGui.QIcon('cmbeam_logo.svg'))
@@ -1358,8 +1469,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
         self.robot_controls_widget.set_robot_speed_pushButton.clicked.connect(self.set_robot_speed)
 
-        self.robot_controls_widget.set_E_plane_pushButton.clicked.connect(lambda: self.send_tool_plane.emit(1))
-        self.robot_controls_widget.set_H_plane_pushButton.clicked.connect(lambda: self.send_tool_plane.emit(0))
+        self.robot_controls_widget.set_E_plane_pushButton.clicked.connect(lambda: self.set_plane_button_clicked(1))
+        self.robot_controls_widget.set_H_plane_pushButton.clicked.connect(lambda: self.set_plane_button_clicked(0))
         self.robot_controls_widget.set_tool_rotation_pushButton.clicked.connect(self.set_tool_rotation)
 
         self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
@@ -1468,6 +1579,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def position_reset_button_clicked(self):
         self.send_robot_to_init.emit()
 
+    @QtCore.pyqtSlot()
+    @movement_wrapper
+    def set_plane_button_clicked(self,Eplane):
+        self.configs.scan_settings["polarization"] = ('co','cx')[Eplane]
+        self.send_tool_plane.emit(Eplane)
+
     def set_tool_rotation(self):
         try:
             phi,az,el,z_phc = [float(x.text()) for x in [self.robot_controls_widget.tool_phi_lineEdit,
@@ -1475,6 +1592,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                                    self.robot_controls_widget.tool_el_lineEdit,
                                                          self.robot_controls_widget.tool_z_lineEdit]]
             self.send_tool_rotation.emit(phi,az,el,z_phc)
+            self.configs.scan_settings["tool_orientation_phi_az_el"] = [phi,az,el]
+            self.configs.scan_settings["phase_center_offset"] = z_phc
         except ValueError:
             print("Value is not a float")
 
@@ -1521,7 +1640,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 points_axes.append(np.linspace(min, max, steps))
             self.scan_coords = points_axes
             self.delta = []
-            if type in scan_type_list[1:4]:
+            if type in scan_type_list[1:6]:
                 par_dict["distance"] = float(self.scan_parameters_widget.extra_params_w_list[1].text())
             if self.vna_connected:
                 shape.append(len(self.freq_arr))
@@ -1569,11 +1688,13 @@ class MainWindow(QtWidgets.QMainWindow):
             par_dict["random_order"] = self.scan_parameters_widget.random_order_checkBox.isChecked()
             par_dict["random_approach"] = self.scan_parameters_widget.random_approach_checkBox.isChecked()
             par_dict["random_approach_distance"] = float(self.scan_parameters_widget.random_approach_dist_lineEdit.text())
+            par_dict["initial"] = False
             if par_dict["random_order"] == True:
                 random.shuffle(self.scanpoint_data)
 
+
             self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'], self.scanpoint_data[0]['i'],
-                                                self.scanpoint_data[0]['d'], par_dict)
+                                                self.scanpoint_data[0]['d'], {**par_dict,"initial":True})
 
             for key in par_dict:
                 self.configs.scan_settings[key] = par_dict[key]
@@ -1687,8 +1808,8 @@ class MainWindow(QtWidgets.QMainWindow):
     #     except ValueError as err:
     #         print('Inputted value is invalid\n' + str(err))
 
-    @QtCore.pyqtSlot(tuple, tuple)
-    def scan_data_add_point(self, index_tuple, dir_tuple):
+    @QtCore.pyqtSlot(tuple, tuple, bool)
+    def scan_data_add_point(self, index_tuple, dir_tuple, skip = False):
         ix, iy, iz = index_tuple
         dir_x, dir_y, dir_z = dir_tuple
         current_point = np.index_exp[ix * dir_x - (1 if dir_x < 0 else 0),
@@ -1698,7 +1819,11 @@ class MainWindow(QtWidgets.QMainWindow):
             if not self.instr.query_bool("*OPC?"):
                 print("WARNING: data has been read before a sweep finished")
             # TODO: select trace to measure
-            data_point = self.query_data(4,raw=True)
+            # print(skip)
+            if not skip:
+                data_point = self.query_data(1,raw=True)
+            else:
+                data_point = np.NAN
             self.data[current_point][:] = data_point
             self.data_robot_positions[current_point] = self.robot_rdk.robot.setParam("Driver","GET $POS_ACT")
             self.data_robot_positions_measured[current_point] = self.robot_rdk.robot.setParam("Driver","GET $POS_ACT_MES")
@@ -1864,15 +1989,15 @@ class MainWindow(QtWidgets.QMainWindow):
                         coords.attrs[key] = self.configs.VNA_settings[key]
 
                 try:
-                    if self.data_robot_positions[0,0] != "":
+                    if self.data_robot_positions.flatten()[0] != "":
                         p1= robot_parse_ASCII_v(self.data_robot_positions)[:,:,:,:-6]
                         p2 = robot_parse_ASCII_v(self.data_robot_positions_measured)[:,:,:,:-6]
                         f.create_dataset("pos_act", data=p1)
                         f.create_dataset("pos_meas", data=p2)
                         f.create_dataset("pos_err", data=p1-p2)
                         f.create_dataset("joints", data=robot_parse_ASCII_v(self.data_robot_joints)[:,:,:,:-6])
-                except AttributeError:
-                    pass
+                except AttributeError as err:
+                    print("Error while saving position data: "+err)
 
 
 
@@ -1969,7 +2094,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_robot_speed()
         self.change_statusbar_color()
 
-
     def run_program_in_sim(self):
         self.run_on_robot = False
         self.robot_rdk.setRunMode(1)  #  RUNMODE_SIMULATE = 1
@@ -1995,17 +2119,29 @@ class MainWindow(QtWidgets.QMainWindow):
     def robot_connect_button_clicked(self):
         if not self.robot_connected:
             try:
-                self.robot_rdk = RDK_KUKA(quit_on_close = True, joints=self.configs.robot_settings["joints2"])
+                if (("obstacle" in self.configs.robot_settings.keys()) and
+                        ("obstacle_position" in self.configs.robot_settings.keys())) :
+                    obstacle_dict = dict(zip(self.configs.robot_settings["obstacle"] ,self.configs.robot_settings["obstacle_position"]))
+                else:
+                    obstacle_dict = None
+                if hasattr(self.configs, "sample_holder_settings"):
+                    sample_holder_settings = self.configs.sample_holder_settings
+                else:
+                    sample_holder_settings = None
+                self.robot_rdk = RDK_KUKA(quit_on_close = True, joints=self.configs.robot_settings["joints2"], obstacles=obstacle_dict, sample_holder_args=sample_holder_settings)
                 self.append_log("Succesfully connected to RoboDK")
                 self.robot_connected = True
                 self.robot_busy = False
                 self.connection_widget.con_robot_pushButton.setText("Disconnect robot")
                 self.connection_widget.con_robot_pushButton.setStyleSheet("background-color: red")
+                self.scan_parameters_widget.radial_distance = 0 if ("obstacle_dist_to_reciever_mm" not in self.configs.misc.keys()) else self.configs.misc["obstacle_dist_to_reciever_mm"]
                 self.coord_update_timer.start()
                 self.change_statusbar_color()
                 self.set_robot_speed()
 
                 self.robot_establish_connection()
+                if self.configs.sample_holder_settings["on_init"]:
+                    self.sample_holder_establish_connection()
 
             finally:
                 pass
@@ -2025,12 +2161,21 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.manualCTab,self.scan_parameters_widget):
             w.setEnabled(self.robot_connected)
 
+
+
     def robot_establish_connection(self):
         self.worker_thread = QtCore.QThread()
         self.worker = RobotMovementObject()
         self.worker.moveToThread(self.worker_thread)
         self.connect_robot_signals()
         self.worker_thread.start()
+
+    def sample_holder_establish_connection(self):
+        self.worker_sh_thread = QtCore.QThread()
+        self.worker_sh = SampleHolderObject(self.configs.sample_holder_settings)
+        self.worker_sh.moveToThread(self.worker_sh_thread)
+        self.connect_sh_signals()
+        self.worker_sh_thread.start()
 
 
     def connect_robot_signals(self):
@@ -2052,6 +2197,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.send_acquisition_time.connect(self.worker.set_acquisition_time)
         self.send_robot_to_init.connect(self.worker.restart_after_killswitch)
         self.worker.monitor.restart_signal.connect(self.restart_after_hit)
+
+    def connect_sh_signals(self):
+        self.worker.rotate_sample.connect(self.worker_sh.rotate_sample_by_angle)
+        pass
+        # self.worker_sh.finished_movement.connect()
 
     def change_statusbar_color(self):
         if self.robot_connected:
@@ -2139,10 +2289,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_VNA_settings()
 
 
-    def query_data(self, ch, raw=False):
+    def query_data(self, ch, raw=False, time_gated=True):
         """Returns the array of datapoints from the VNA.
         Formatted real values if raw is True, unformatted complex if false"""
-        data = msgtoarr(self.instr.query(f'CALC1:DATA:TRAC? "Trc{ch}", {["F", "S"][raw]}DAT'))
+        # data = msgtoarr(self.instr.query(f'CALC1:DATA:TRAC? "Trc{ch}", {["F", "S"][raw]}DAT'))
+        if type(ch) == int:
+            trace = f"Trc{ch}"
+        elif type(ch) == str:
+            trace = ch
+        else :
+            return None
+        data = msgtoarr(self.instr.query(f'CALC1:DATA:TRAC? "{trace}", {["F", ["S", "M"][time_gated]][raw]}DAT'))
         if raw:
             data = data[::2] + 1j * data[1::2]
         return data
@@ -2162,7 +2319,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # print(self.configs.traces_to_show)
             self.traces = []
             for trace in self.configs.traces_to_show:
-                self.traces.append(self.vna_plot_w.ax.plot(self.freq_arr, self.query_data(self.dict_of_trace_nums[trace]), label=f"{self.dict_of_trace_meas[trace]}")[0])
+                self.traces.append(self.vna_plot_w.ax.plot(self.freq_arr, self.query_data(trace), label=f"{self.dict_of_trace_meas[trace]}")[0])
             self.vna_plot_w.ax.legend()
             if reset_trace_list:
                 self.vna_plot_w.traces_toolmenu.clear()       # delete all items from comboBox
@@ -2177,8 +2334,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.traces = [self.vna_plot_w.ax.plot(self.freq_arr, np.zeros_like(self.freq_arr),label = "S21")[0]]
             scan_slice = self.return_scan_slice(self.scan_plot_w.slice_direction_combobox.currentText(),
                                                 self.scan_plot_w.coordinate_slider.value(), np.index_exp[:][0])
-            self.vna_plot_w.ax.set_ylim(self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data[scan_slice]).min(),
-                                        self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data[scan_slice]).max())
+            self.vna_plot_w.ax.set_ylim(np.nanmin(self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data[scan_slice])),
+                                        np.nanmax(self.scan_plot_w.plot_formats[self.scan_plot_w.plot_format_combobox.currentText()](self.data[scan_slice])))
 
         self.vna_plot_w.figure.tight_layout()
 
@@ -2402,8 +2559,14 @@ class MainWindow(QtWidgets.QMainWindow):
         k0 = self.freq_arr[self.scan_plot_w.frequency_slider.value()] * 1e9 * 2 * np.pi / const.speed_of_light
         # kx1 = 2*np.pi*self.scan_coords[0]*1e3/(self.scan_coords[0].max())/abs(self.scan_coords[0][1]-self.scan_coords[0][0])
         # ky1 = 2*np.pi*self.scan_coords[1]*1e3/(self.scan_coords[1].max())/abs(self.scan_coords[1][1]-self.scan_coords[1][0])
-        kx1 = 2*np.pi*self.scan_coords[0]*1e3/(self.scan_coords[0].size)/abs(self.scan_coords[0][1]-self.scan_coords[0][0])**2
-        ky1 = 2*np.pi*self.scan_coords[1]*1e3/(self.scan_coords[1].size)/abs(self.scan_coords[1][1]-self.scan_coords[1][0])**2
+        if  len(self.scan_coords[0])>1 and not self.scan_coords[0][1] == self.scan_coords[0][0]:
+            kx1 = 2*np.pi*self.scan_coords[0]*1e3/(self.scan_coords[0].size)/abs(self.scan_coords[0][1]-self.scan_coords[0][0])**2
+        else:
+            kx1 = 0
+        if len(self.scan_coords[1])>1 and not (self.scan_coords[1][1] == self.scan_coords[1][0]):
+            ky1 = 2*np.pi*self.scan_coords[1]*1e3/(self.scan_coords[1].size)/abs(self.scan_coords[1][1]-self.scan_coords[1][0])**2
+        else:
+            ky1 = 0
         if self.scan_plot_w.checkbox_backpropagation.isChecked():
             # kx = 2*np.pi*self.scan_coords[0]/(self.scan_coords[0].size)
             # ky = 2*np.pi*self.scan_coords[1]/(self.scan_coords[1].size)
@@ -2560,7 +2723,7 @@ class MainWindow(QtWidgets.QMainWindow):
             formatted_data = format_function(data[scan_slice])
         else:
             formatted_data = format_function(data[scan_slice] / np.abs(data[scan_slice]).max())
-        self.trace_plot_update_from_datafile()
+        # self.trace_plot_update_from_datafile() #todo
         if len(formatted_data[scan_slice_2]) == len(self.sliceplot.get_ydata()):
             self.sliceplot.set_ydata(formatted_data[scan_slice_2])
             if self.sim_data_available:

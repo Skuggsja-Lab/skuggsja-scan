@@ -6,16 +6,18 @@ from PyQt6.QtCore import QTimer
 import numpy as np
 import threading
 class RDK_KUKA(Robolink):
-    def __init__(self, coordinates = None, joints = None, *args, **kargs):
+    def __init__(self, coordinates = None, joints = None, obstacles=None,sample_holder_args = None, *args, **kargs):
         super(RDK_KUKA, self).__init__(*args, **kargs)
-
-        self.robot = self.ItemUserPick('KUKA KR 6 R900 2', ITEM_TYPE_ROBOT)
+        self.sample_holder_in_workpace = False
+        self.robot = self.Item('KUKA KR 6 R900-2', ITEM_TYPE_ROBOT)
         if not self.robot.Valid():
             self.AddFile("KUKA-KR-6-R900-2.robot")
+            # self.AddFile("KUKA-KR-6-R700-sixx.robot")
             self.AddFile("w_band_mount.tool")
-            self.robot = self.ItemUserPick('KUKA KR 6 R900 2', ITEM_TYPE_ROBOT)
-            # self.robot.setPoseTool(self.robot.PoseTool()*rotz(pi))
-            self.robot.setPoseTool(self.robot.PoseTool() * rotz(-pi/2))
+            self.robot = self.Item('KUKA KR 6 R900-2', ITEM_TYPE_ROBOT)
+            # self.robot = self.ItemUserPick('KUKA KR 6 R700 sixx', ITEM_TYPE_ROBOT)
+            self.robot.setPoseTool(self.robot.PoseTool()*rotz(pi))
+            # self.robot.setPoseTool(self.robot.PoseTool() * rotz(-pi/2))
             self.robot.setVisible(1, VISIBLE_ROBOT_DEFAULT and not VISIBLE_ROBOT_FLANGE)
             self.robot.setSpeed(-1,20)  # Set linear speed in mm/s, joints speed in deg/s
             if coordinates != None or joints != None:
@@ -30,9 +32,17 @@ class RDK_KUKA(Robolink):
             self.AddTarget('Target scan initial',self.robot.Parent())
             self.AddTarget('Target scan',self.robot.Parent())
 
+            if obstacles is not None:
+                for obstacle in obstacles.keys():
+                    new_item = self.AddFile(obstacle)
+                    new_item.setPose(KUKA_2_Pose(obstacles[obstacle]))
+
         self.default_pose_tool = self.robot.PoseTool()
-        self.tool = self.ItemUserPick("w_band_mount", ITEM_TYPE_TOOL)
+        self.tool = self.Item("w_band_mount", ITEM_TYPE_TOOL)
+        self.robot.setPoseFrame(self.robot.Parent())
         self.setCollisionActivePair(COLLISION_OFF, self.tool, self.robot.ObjectLink(6))
+        # self.AddFile("opticbench.STEP")
+
         self.target_init = self.Item('Target initial')
         self.target_init_cross = self.Item('Target initial cross')
         if coordinates != None or joints != None:
@@ -56,9 +66,55 @@ class RDK_KUKA(Robolink):
         self.target_scan_init = self.Item('Target scan initial')
         # self.target_scan_init.setPose(self.frame_scan_init.Pose())
         self.target_scan = self.Item('Target scan')
+        for target in [self.target_init,self.target_init_cross,
+                       self.target_rel,
+                       self.target_scan_init,self.target_scan]:
+            target.setRobot(self.robot)
         # self.target_scan.setPose(self.frame_scan_init.Pose())
-
+        if sample_holder_args != None:
+            self.sample_holder_args = sample_holder_args
+            if sample_holder_args["on_init"]:
+                self.add_sample_holder(**sample_holder_args)
         # self.robot.MoveJ(self.target_init)
+    def add_sample_holder(self,rel_position,robot = "Mecademic-Meca500-R3.robot", sample = None, joints = None,joints_away = None, **kargs):
+        self.sample_holder = self.Item(" ".join(robot.split(".")[0].split("-")), ITEM_TYPE_ROBOT)
+        if not self.sample_holder.Valid():
+            self.AddFile(robot)
+            if sample != None:
+                self.AddFile(sample)
+            self.sample_holder = self.Item(" ".join(robot.split(".")[0].split("-")), ITEM_TYPE_ROBOT)
+            # self.sample_holder.setPoseTool(self.robot.PoseTool() * rotz(pi))
+            self.sample_holder.setVisible(1, VISIBLE_ROBOT_DEFAULT and not VISIBLE_ROBOT_FLANGE)
+            self.sample_holder.Parent().setPose(Staubli_2_Pose(rel_position))
+            self.AddFile("frame_tool.tool",self.sample_holder)
+            self.sample_holder.setPoseFrame(self.sample_holder.Parent())
+
+            if joints != None:
+                self.sample_holder.setJoints(joints)
+
+            self.AddTarget('Target holder initial',self.sample_holder.Parent())
+            self.AddTarget('Target holder away', self.sample_holder.Parent())
+            self.AddTarget('Target holder rotation', self.sample_holder.Parent())
+            self.AddTarget('Target holder rotation initial', self.sample_holder.Parent())
+
+        self.target_holder_init = self.Item('Target holder initial')
+        self.target_holder_init.setRobot(self.sample_holder)
+        self.target_holder_init.setAsJointTarget()
+        self.target_holder_init.setJoints(joints)
+        self.target_holder_init.setPose(self.sample_holder.SolveFK(joints))
+        self.target_holder_away = self.Item('Target holder away')
+        self.target_holder_away.setRobot(self.sample_holder)
+        self.target_holder_away.setAsJointTarget()
+        self.target_holder_away.setJoints(joints_away)
+        self.target_holder_away.setPose(self.sample_holder.SolveFK(joints_away))
+        self.target_holder_rot = self.Item('Target holder rotation')
+        self.target_holder_rot.setRobot(self.sample_holder)
+        self.target_holder_rot.setPose(self.sample_holder.Pose())
+        self.target_holder_rot_init = self.Item('Target holder rotation initial')
+        self.target_holder_rot_init.setRobot(self.sample_holder)
+        self.target_holder_rot_init.setPose(self.sample_holder.Pose())
+        self.sample_holder_in_workpace = True
+
 
 
     def move_target(self, target, coordinate_tuple):
@@ -102,7 +158,14 @@ class RDK_KUKA(Robolink):
         if self.RunMode() != RUNMODE_RUN_ROBOT:
             # Update connection parameters if required:
             self.robot.setConnectionParams(ip,port,'/', 'anonymous','')
-
+            if self.sample_holder_in_workpace:
+                self.sample_holder.setConnectionParams(self.sample_holder_args["ip"],port,'/', 'anonymous','')
+                success_sh = self.sample_holder.Connect()
+                status_sh, status_sh_msg = self.robot.ConnectedState()
+                if status_sh != ROBOTCOM_READY:
+                    # Stop if the connection did not succeed
+                    print(status_sh_msg)
+                    print("Failed to connect: " + status_sh_msg)
             # Connect to the robot using default IP
             success = self.robot.Connect()  # Try to connect once
             # success robot.ConnectSafe() # Try to connect multiple times
@@ -115,6 +178,7 @@ class RDK_KUKA(Robolink):
 
             # This will set to run the API programs on the robot and the simulator (online programming)
             self.setRunMode(RUNMODE_RUN_ROBOT)
+
 
 
 class x_slider(QWidget):
