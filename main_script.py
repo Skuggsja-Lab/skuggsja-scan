@@ -13,7 +13,7 @@ from skuggsja_config import Config
 from robodk_functions import RDK_KUKA
 import robodk.robomath as robomath
 import robodk.robolinkutils as robolinkutils
-from robodk.robolink import TargetReachError, StoppedError
+from robodk.robolink import TargetReachError, StoppedError, COLLISION_ON
 # from robodk.robomath import *
 import threading
 import functools
@@ -32,10 +32,11 @@ myappid = 'mycompany.myproduct.subproduct.version' # arbitrary string
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-SAVE_ON_SCAN_END = False
-scan_type_dict = {"XYZ scan":("X","Y","Z"),"Ludwig 2: AE":("Az","El","R"),
-              "Angular sweep":("Az","El","R"),"Ludwig 3":("θ","φ","R"),"Ludwig 2: EA":("Az","El","R"),
-                "Rotate sample":("Az","Alpha","R")}
+SAVE_ON_SCAN_END = True
+SAVE_WHEN_SIMULATED = False
+scan_type_dict = {"XYZ scan":("X","Y","Z"),"Ludwig 2 AE":("Az","El","R"),
+              "Angular sweep":("Az","El","R"),"Ludwig 3":("θ","φ","R"),"Ludwig 2 EA":("Az","El","R"),
+                "Rotate sample":("Az","Alpha","R"),"Move sample":("Az","Xs","Ys")}
 scan_type_list = list(scan_type_dict.keys())
 
 robot_parse_ASCII = lambda x: np.array([float(y.split()[-1]) for y in x.strip('{}').split(",")])
@@ -131,10 +132,11 @@ class RobotMovementObject(QtCore.QObject):
     finished_scan = QtCore.pyqtSignal()
     ready_for_acquisition = QtCore.pyqtSignal()
     rotate_sample = QtCore.pyqtSignal(float)
-    def __init__(self):
+    move_sample = QtCore.pyqtSignal(float,float)
+    def __init__(self,sample_holder_args = None):
         super(RobotMovementObject, self).__init__()
         # self.movement_lock = threading.Lock()
-        self.rdk_instance = RDK_KUKA(quit_on_close = True)
+        self.rdk_instance = RDK_KUKA(quit_on_close = True,sample_holder_args=sample_holder_args)
         self.monitor = RobotMovementMonitorObject()
         self.monitor_thread = QtCore.QThread()
         # self.monitor.moveToThread(self.monitor_thread)
@@ -147,14 +149,26 @@ class RobotMovementObject(QtCore.QObject):
         self.acquisition_time = 0
         self.E_plane = 0
         self.E_plane_direction = -1
+        self.assign_items()
+        self.alt_initial_values()
+
+    def assign_items(self):
+        self.robot = self.rdk_instance.robot
+        self.t_init = self.rdk_instance.target_init
+        self.t_rel = self.rdk_instance.target_rel
+        self.t_scan = self.rdk_instance.target_scan
+        self.t_scan_init = self.rdk_instance.target_scan_init
+
+    def alt_initial_values(self):
+        pass
 
     @QtCore.pyqtSlot(bool)
     def set_plane(self,E_plane = False):
         if E_plane:
-            self.rdk_instance.robot.setPoseTool(self.rdk_instance.default_pose_tool*robomath.rotz(-np.pi/2*self.E_plane_direction))
+            self.robot.setPoseTool(self.rdk_instance.default_pose_tool*robomath.rotz(-np.pi/2*self.E_plane_direction))
             self.E_plane = 1
         else:
-            self.rdk_instance.robot.setPoseTool(self.rdk_instance.default_pose_tool)
+            self.robot.setPoseTool(self.rdk_instance.default_pose_tool)
             self.E_plane = 0
 
     @QtCore.pyqtSlot(float,float,float,float)
@@ -163,7 +177,7 @@ class RobotMovementObject(QtCore.QObject):
             pose_tool = self.rdk_instance.default_pose_tool*robomath.rotz(np.pi/2*self.E_plane_direction)
         else:
             pose_tool = self.rdk_instance.default_pose_tool
-        self.rdk_instance.robot.setPoseTool(pose_tool.Offset(0,0,z_phc)*robomath.rotz(np.deg2rad(phi))*robomath.roty(np.deg2rad(az))*robomath.rotx(np.deg2rad(el)))
+        self.robot.setPoseTool(pose_tool.Offset(0,0,z_phc)*robomath.rotz(np.deg2rad(phi))*robomath.roty(np.deg2rad(az))*robomath.rotx(np.deg2rad(el)))
 
     @QtCore.pyqtSlot(tuple,tuple,tuple,dict)
     @movement_wrapper_robot_internal
@@ -176,7 +190,7 @@ class RobotMovementObject(QtCore.QObject):
             # coord_tuple, index_tuple, dir_tuple, settle_time
             if scan_type == scan_type_list[0]:
                 x, y, z = coord_tuple
-                new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+                new_pose = self.t_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
             if scan_type == scan_type_list[1] or scan_type == scan_type_list[2]:
                 azimuth, elevation, r = coord_tuple
                 distance = settings["distance"]
@@ -184,7 +198,7 @@ class RobotMovementObject(QtCore.QObject):
                     r = 0
                     distance = 0
                 r = (distance-r)
-                new_pose = self.rdk_instance.target_scan_init.Pose() * \
+                new_pose = self.t_scan_init.Pose() * \
                            (robomath.eye().Offset(x=r * np.sin(np.deg2rad(azimuth)), y=r * np.sin(np.deg2rad(elevation)),
                                                   z=distance - abs(r * np.cos(np.deg2rad(azimuth)) * np.cos(np.deg2rad(elevation))),
                                                   rx=0, ry=-azimuth))*robomath.eye().Offset(x=0,y=0,z=0,rx=elevation)
@@ -192,7 +206,7 @@ class RobotMovementObject(QtCore.QObject):
                 theta, phi, r = coord_tuple
                 distance = settings["distance"]
                 r = (distance - r)
-                new_pose = self.rdk_instance.target_scan_init.Pose() * \
+                new_pose = self.t_scan_init.Pose() * \
                                        (robomath.eye().Offset(x=r * np.cos(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
                                                           y=r * np.sin(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
                                                           z=distance - abs(r * np.cos(np.deg2rad(theta))),
@@ -205,7 +219,7 @@ class RobotMovementObject(QtCore.QObject):
                     r = 0
                     distance = 0
                 r = (distance-r)
-                new_pose = self.rdk_instance.target_scan_init.Pose() * \
+                new_pose = self.t_scan_init.Pose() * \
                            (robomath.eye().Offset(x=r * np.sin(np.deg2rad(azimuth)), y=r * np.sin(np.deg2rad(elevation)),
                                                   z=distance - abs(r * np.cos(np.deg2rad(azimuth)) * np.cos(np.deg2rad(elevation))),
                                                   rx=elevation, ry=-azimuth))
@@ -215,14 +229,26 @@ class RobotMovementObject(QtCore.QObject):
                 distance = settings["distance"]
                 r = (distance - r)
                 self.rotate_sample.emit(alpha)
-                new_pose = self.rdk_instance.target_scan_init.Pose() * \
+                new_pose = self.t_scan_init.Pose() * \
                            (robomath.eye().Offset(x=r * np.sin(np.deg2rad(azimuth)),
                                                   y=0,
                                                   z= distance - abs(
                                                       r * np.cos(np.deg2rad(azimuth))),
                                                   rx=0, ry=-azimuth)) * robomath.eye().Offset(x=0, y=0, z=0)
 
-            self.rdk_instance.target_scan.setPose(new_pose)
+            if scan_type == "Move sample":
+                azimuth, xs, ys = coord_tuple
+                distance = settings["distance"]
+                r = distance
+                self.move_sample.emit(xs,ys)
+                new_pose = self.t_scan_init.Pose() * \
+                           (robomath.eye().Offset(x=r * np.sin(np.deg2rad(azimuth)),
+                                                  y=0,
+                                                  z= distance - abs(
+                                                      r * np.cos(np.deg2rad(azimuth))),
+                                                  rx=0, ry=-azimuth)) * robomath.eye().Offset(x=0, y=0, z=0)
+
+            self.t_scan.setPose(new_pose)
             # if not settings["initial"]:
             #     self.moveJointsSafe(new_pose, lin=(scan_type == scan_type_list[0]))
             # else:
@@ -261,18 +287,18 @@ class RobotMovementObject(QtCore.QObject):
     #         phi, theta, r = coord_tuple
     #         theta, phi, r = coord_tuple
     #         r = np.abs(r)
-    #         # new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
-    #         new_pose = self.rdk_instance.target_scan_init.Pose() * (robomath.eye().Offset(x =0, y =0, z=0,rx=theta,ry=phi))
-    #         new_pose = self.rdk_instance.target_scan_init.Pose() * \
+    #         # new_pose = self.t_scan_init.Pose() * (robomath.eye().Offset(x, y, z))
+    #         new_pose = self.t_scan_init.Pose() * (robomath.eye().Offset(x =0, y =0, z=0,rx=theta,ry=phi))
+    #         new_pose = self.t_scan_init.Pose() * \
     #                    (robomath.eye().Offset(x =r*np.sin(np.deg2rad(phi)), y =r*np.sin(np.deg2rad(theta)),
     #                                           z=abs(r*np.cos(np.deg2rad(phi))*np.cos(np.deg2rad(theta))-r),
     #                                           rx=theta,ry=phi))
-    #         new_pose = self.rdk_instance.target_scan_init.Pose() * \
+    #         new_pose = self.t_scan_init.Pose() * \
     #                    (robomath.eye().Offset(x=r * np.cos(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
     #                                           y=r * np.sin(np.deg2rad(phi)) * np.sin(np.deg2rad(theta)),
     #                                           z=r - abs(r * np.cos(np.deg2rad(theta))),
     #                                           rx=theta * np.sin(np.deg2rad(phi)), ry=-theta * np.cos(np.deg2rad(phi))))
-    #         self.rdk_instance.target_scan.setPose(new_pose)
+    #         self.t_scan.setPose(new_pose)
     #         self.moveJointsSafe(new_pose)
     #         # print(coord_tuple)
     #         time.sleep(self.settle_time)
@@ -282,17 +308,17 @@ class RobotMovementObject(QtCore.QObject):
     #         self.finished_movement.emit()
 
     def moveJointsSafe(self, new_pose, lin = False, verbose = False):
-        if len(self.rdk_instance.robot.SolveIK(new_pose, tool=self.rdk_instance.robot.PoseTool()).tolist()) == 6:
+        if len(self.robot.SolveIK(new_pose, tool=self.robot.PoseTool()).tolist()) == 6:
             config = np.squeeze(
-                self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints())[:3]).tolist()
+                self.robot.JointsConfig(self.t_init.Joints())[:3]).tolist()
             # config[-1] = -1
             # print(config)
-            joints = robolinkutils.SolveIK_Conf(self.rdk_instance.robot, new_pose,
-                                                toolpose=self.rdk_instance.robot.PoseTool(), joint_config=config)
-            # print(self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints()))
-            # self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
+            joints = robolinkutils.SolveIK_Conf(self.robot, new_pose,
+                                                toolpose=self.robot.PoseTool(), joint_config=config)
+            # print(self.robot.JointsConfig(self.t_init.Joints()))
+            # self.robot.MoveJ(self.t_scan.Pose())
             if len(joints) > 0:
-                diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.target_init.Joints())[:, :6],
+                diff = np.array(joints)[:, :-2] - np.tile(np.array(self.t_init.Joints())[:, :6],
                                                           (len(joints), 1))
                 j6_diff = diff[:,-1]
                 j4_diff = diff[:, -3]
@@ -303,7 +329,7 @@ class RobotMovementObject(QtCore.QObject):
 
             if any((abs(j4_diff+j6_diff)<300) * (abs(j6_diff)<300) * (abs(j4_diff)<180)):
 
-                # diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.robot.Joints())[:, :6],
+                # diff = np.array(joints)[:, :-2] - np.tile(np.array(self.robot.Joints())[:, :6],
                 #                                           (len(joints), 1))
                 diff = diff[(abs(j4_diff+j6_diff)<300) * (abs(j6_diff)<300) * (abs(j4_diff)<180)]
                 # print(diff[np.linalg.norm(diff, axis=1).argmin()])
@@ -319,9 +345,9 @@ class RobotMovementObject(QtCore.QObject):
                     print('joints ', joints)
                     print('best ',best_config)
                 if lin:
-                    self.rdk_instance.robot.MoveL(joints[np.linalg.norm(diff, axis=1).argmin()])
+                    self.robot.MoveL(joints[np.linalg.norm(diff, axis=1).argmin()])
                 else:
-                    self.rdk_instance.robot.MoveJ(joints[np.linalg.norm(diff, axis=1).argmin()])
+                    self.robot.MoveJ(joints[np.linalg.norm(diff, axis=1).argmin()])
                 return True
             else:
                 print("No suitable configuration found")
@@ -335,15 +361,15 @@ class RobotMovementObject(QtCore.QObject):
     def move_robot_to_coordinate(self, coord_tuple):
         self.began_movement.emit()
         pose_to_move_to = robomath.KUKA_2_Pose(coord_tuple)
-        # if len(self.rdk_instance.robot.SolveIK(pose_to_move_to).tolist()) == 6:
-        self.rdk_instance.target_rel.setPose(pose_to_move_to)
+        # if len(self.robot.SolveIK(pose_to_move_to).tolist()) == 6:
+        self.t_rel.setPose(pose_to_move_to)
         self.moveJointsSafe(pose_to_move_to)
         self.finished_movement.emit()
 
     @QtCore.pyqtSlot(tuple)
     @movement_wrapper_robot_internal
     def move_robot_relative(self, coord_tuple):
-        current = robomath.Pose_2_KUKA(self.rdk_instance.target_rel.Pose())
+        current = robomath.Pose_2_KUKA(self.t_rel.Pose())
         new = [current[i] + x for i, x in enumerate(coord_tuple)]
         self.move_robot_to_coordinate(new)
 
@@ -351,7 +377,7 @@ class RobotMovementObject(QtCore.QObject):
     @movement_wrapper_robot_internal
     def move_robot_to_init_scan(self):
         self.began_movement.emit()
-        self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan_init)
+        self.robot.MoveJ(self.t_scan_init)
         self.finished_movement.emit()
         self.finished_scan.emit()
 
@@ -359,8 +385,9 @@ class RobotMovementObject(QtCore.QObject):
     @movement_wrapper_robot_internal
     def move_robot_to_init(self):
         self.began_movement.emit()
-        self.rdk_instance.robot.MoveJ(self.rdk_instance.target_init.Joints())
-        self.rdk_instance.target_rel.setPose(self.rdk_instance.target_init.Pose())
+        self.robot.MoveJ(self.t_init.Joints())
+        self.t_rel.setPose(self.t_init.Pose())
+        self.ready_for_acquisition.emit()
         self.finished_movement.emit()
 
     @QtCore.pyqtSlot()
@@ -389,68 +416,142 @@ class RobotMovementObject(QtCore.QObject):
     def talk(self):
         print('yooooooo')
 
+opt_waitCondition = QtCore.QWaitCondition()
+opt_mutex = QtCore.QMutex()
+
 class SampleHolderObject(RobotMovementObject):
-    def __init__(self, sh_dict):
-        super(SampleHolderObject, self).__init__()
-        self.rdk_instance = RDK_KUKA(sample_holder_args=sh_dict)
+    holder_position_changed = QtCore.pyqtSignal()
 
-    def moveJointsSafeSH(self, new_pose, lin = False,verbose = False):
-        if len(self.rdk_instance.sample_holder.SolveIK(new_pose, tool=self.rdk_instance.sample_holder.PoseTool()).tolist()) == 6:
-            config = np.squeeze(
-                self.rdk_instance.sample_holder.JointsConfig(self.rdk_instance.target_holder_init.Joints())[:3]).tolist()
-            # config[-1] = -1
-            # print(config)
-            joints = robolinkutils.SolveIK_Conf(self.rdk_instance.sample_holder, new_pose,
-                                                toolpose=self.rdk_instance.sample_holder.PoseTool(), joint_config=config)
-            # print(self.rdk_instance.robot.JointsConfig(self.rdk_instance.target_init.Joints()))
-            # self.rdk_instance.robot.MoveJ(self.rdk_instance.target_scan.Pose())
-            if len(joints) > 0:
-                diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.target_holder_init.Joints())[:, :6],
-                                                          (len(joints), 1))
-                j6_diff = diff[:,-1]
-                j4_diff = diff[:, -3]
-            else:
-                print("No suitable configuration found")
-                return
+    def assign_items(self):
+        self.robot = self.rdk_instance.sample_holder
+        self.t_init = self.rdk_instance.target_holder_init
+        self.t_rel = self.rdk_instance.target_holder_rel
+        self.t_scan = self.rdk_instance.target_holder_scan
+        self.t_scan_init = self.rdk_instance.target_holder_scan_init
+        self.t_alt = self.rdk_instance.target_holder_away
 
-            if any((abs(j4_diff + j6_diff) < 300) * (abs(j6_diff) < 300) * (abs(j4_diff) < 180)):
-
-                # diff = np.array(joints)[:, :-2] - np.tile(np.array(self.rdk_instance.robot.Joints())[:, :6],
-                #                                           (len(joints), 1))
-                diff = diff[(abs(j4_diff + j6_diff) < 300) * (abs(j6_diff) < 300) * (abs(j4_diff) < 180)]
-                # print(diff[np.linalg.norm(diff, axis=1).argmin()])
-                best_config = diff[np.linalg.norm(diff, axis=1).argmin()]
-                # if len(np.unique(np.linalg.norm(diff, axis=1)))<len(np.linalg.norm(diff, axis=1)):
-                #     print("Several optimal poses might have been found")
-                # diff = diff[np.sign(diff[:,-1]) == np.sign(diff[:,-3])]
-                if verbose:
-                    print('pose ', new_pose)
-                    print('difference ', diff)
-                    print('difference norm ', np.linalg.norm(diff, axis=1))
-                    print(np.linalg.norm(diff, axis=1).argmin())
-                    print('joints ', joints)
-                    print('best ', best_config)
-                if lin:
-                    self.rdk_instance.sample_holder.MoveL(joints[np.linalg.norm(diff, axis=1).argmin()])
-                else:
-                    self.rdk_instance.sample_holder.MoveJ(joints[np.linalg.norm(diff, axis=1).argmin()])
-                return True
-            else:
-                print("No suitable configuration found")
-                return False
-        else:
-            print("Target coordinates are inaccessible at ", robomath.Pose_2_KUKA(new_pose))
-            return False
+    def alt_initial_values(self):
+        self.settle_time = 1
 
     @QtCore.pyqtSlot(float)
+    @QtCore.pyqtSlot(float,float,float)
     @movement_wrapper_robot_internal
-    def rotate_sample_by_angle(self, alpha):
-        new_pose = self.rdk_instance.target_holder_rot_init.Pose() * (robomath.eye().Offset(x=0,
+    def rotate_sample_by_angle(self, alpha, beta=0, gamma=0):
+        self.began_movement.emit()
+        new_pose = self.t_scan_init.Pose() * (robomath.eye().Offset(x=0,
                                                   y=0,
                                                   z= 0,
-                                                  rx=alpha, ry=0)) * robomath.eye().Offset(x=0, y=0, z=0)
-        self.rdk_instance.target_holder_rot.setPose(new_pose)
-        self.moveJointsSafeSH(new_pose)
+                                                  rx=alpha, ry=beta, rz=gamma)) * robomath.eye().Offset(x=0, y=0, z=0)
+        self.t_scan.setPose(new_pose)
+        self.moveJointsSafe(new_pose)
+        time.sleep(self.settle_time)
+        self.ready_for_acquisition.emit()
+        time.sleep(self.acquisition_time*2)
+        self.finished_movement.emit()
+        opt_waitCondition.wakeAll()
+
+
+    @QtCore.pyqtSlot(float, float)
+    @movement_wrapper_robot_internal
+    def move_sample_in_plane(self, x,y):
+        self.began_movement.emit()
+        new_pose = self.t_scan_init.Pose() * robomath.eye().Offset(x=0, y=y, z=x)
+        self.t_scan.setPose(new_pose)
+        self.moveJointsSafe(new_pose)
+        time.sleep(self.settle_time)
+        self.ready_for_acquisition.emit()
+        time.sleep(self.acquisition_time * 2)
+        self.finished_movement.emit()
+        opt_waitCondition.wakeAll()
+
+    @QtCore.pyqtSlot()
+    @movement_wrapper_robot_internal
+    def send_sample_holder_away(self):
+        self.began_movement.emit()
+        self.robot.MoveJ(self.t_alt)
+        time.sleep(self.settle_time)
+        self.ready_for_acquisition.emit()
+        time.sleep(self.acquisition_time*2)
+        self.finished_movement.emit()
+        self.holder_position_changed.emit()
+
+    @QtCore.pyqtSlot()
+    def set_init_to_current(self):
+        # self.t_init.setJoints(self.robot.Joints())
+        self.t_scan_init.setPose(self.robot.Pose())
+
+class OptimizationThread(QtCore.QObject):
+    send_optimized_position = QtCore.pyqtSignal(tuple)
+    send_sh_sample_angle = QtCore.pyqtSignal(float, float, float)
+    def __init__(self):
+        super(OptimizationThread, self).__init__()
+
+    def set_vna_params(self,VNA,reflection_trace):
+        self.instr = VNA
+        self.reflection_trace = reflection_trace
+        # self.sweep_time = self.instr.query_float('SWEep:TIMe?')
+
+    def query_data(self, ch, raw=False, time_gated=True):
+        """Returns the array of datapoints from the VNA.
+        Formatted real values if raw is True, unformatted complex if false"""
+        # data = msgtoarr(self.instr.query(f'CALC1:DATA:TRAC? "Trc{ch}", {["F", "S"][raw]}DAT'))
+        if type(ch) == int:
+            trace = f"Trc{ch}"
+        elif type(ch) == str:
+            trace = ch
+        else :
+            return None
+        data = msgtoarr(self.instr.query(f'CALC1:DATA:TRAC? "{trace}", {["F", ["S", "M"][time_gated]][raw]}DAT'))
+        if raw:
+            data = data[::2] + 1j * data[1::2]
+        return data
+
+    def move_sample_and_measure_reflection(self, d_arr, plot=False, averaging=False, avsamp=5, wait=2, **kwargs):
+        da, db = d_arr
+        # The robot will rotate the sample by 'da' degrees in the horizontal plane and by 'db' degrees in the vertical plane
+        # The new rotation replaces the rotation angles in the initial pose
+        self.send_sh_sample_angle.emit(0, da, db)
+        # waits a set number of data taking passes for the sample to stop wobbling somewhat
+        # todo: replace this with a set amount of seconds
+        opt_mutex.lock()
+        opt_waitCondition.wait(opt_mutex)
+        opt_mutex.unlock()
+        # time.sleep(self.sweep_time * wait)
+        # time.sleep(self.configs.VNA_settings["time_per_sweep"])
+        # Reads the reflection data
+        data = self.query_data(self.reflection_trace, raw=1)
+        # result = 1 - abs(data).mean()
+        result = - (20*np.log10(abs(data))).mean()
+        print(d_arr, result)
+        return result
+
+    @QtCore.pyqtSlot(bool)
+    def optimization_request_received(self, continue_to_scan=False):
+        # self.sweep_time = self.instr.query_float('SWEep:TIMe?')
+        opt_args = (1, 0, 5, 1)
+        pos_opt = sp.optimize.minimize(self.move_sample_and_measure_reflection, (0, 0), method='Powell',
+                                           args=opt_args,
+                                           options={"maxiter": 40, "ftol" : 1e-4})
+        print(pos_opt)
+        self.send_optimized_position.emit(tuple(pos_opt.x))
+
+
+# if self.configs.scan_settings["optimize_sample_orientation"]:
+#     opt_args = (1, 0, 5, 3)
+#     pos_opt = sp.optimize.minimize(self.move_sample_and_measure_reflection, (0, 0), method='Powell',
+#                                    args=opt_args,
+#                                    options={"maxiter": 40, "ftol" : 1e-4})
+#     print(pos_opt)
+#     self.configs.sample_holder_settings["joints_opt"] = self.robot_rdk.sample_holder.Joints().list()
+#     self.configs.sample_holder_settings["pose_opt"] = robomath.Pose_2_Staubli(self.robot_rdk.sample_holder.Pose())
+#     self.configs.sample_holder_settings["angle_opt"] = pos_opt.x
+#     self.send_sh_set_init_to_current.emit()
+# self.save_reference_data("Sample")
+# if self.configs.scan_settings["take_reference_empty_measurement"]:
+#     self.send_sh_to_alt.emit()
+# else:
+#     self.scan_started = 1
+#     self.scan_general()
 
 
 def msgtoarr(s):
@@ -838,6 +939,11 @@ class ScanParametersWidget(QtWidgets.QWidget):
             w.setVisible(False)
             w.sizePolicy().setRetainSizeWhenHidden(True)
 
+
+        self.scan_types = scan_type_list
+        self.scan_type_combobox = QtWidgets.QComboBox(parent=self)
+        self.scan_type_combobox.addItems(self.scan_types)
+
         self.sttl_label = QtWidgets.QLabel()
         self.sttl_label.setText("Settling time, s")
         self.sttl_lineEdit = QtWidgets.QLineEdit()
@@ -886,8 +992,43 @@ class ScanParametersWidget(QtWidgets.QWidget):
         random_layout.addSpacerItem(QtWidgets.QSpacerItem(10, 10, QtWidgets.QSizePolicy.Policy.Expanding,
                                                                  QtWidgets.QSizePolicy.Policy.Minimum))
 
+
+        self.sample_checkBox = QtWidgets.QCheckBox()
+        self.sample_checkBox.setText("Sample")
+        self.reference_checkBox = QtWidgets.QCheckBox()
+        self.reference_checkBox.setText("Reference meas")
+        self.empty_checkBox = QtWidgets.QCheckBox()
+        self.empty_checkBox.setText("Empty meas")
+        self.opt_checkBox = QtWidgets.QCheckBox()
+        self.opt_checkBox.setText("Optimize position")
+        self.empty_scan_checkBox = QtWidgets.QCheckBox()
+        self.empty_scan_checkBox.setText("Queue ref scan")
+        self.sample_checkBox.clicked.connect(lambda: self.flip_sample_chkb(self.sample_checkBox.isChecked()))
+        self.reference_checkBox.clicked.connect(lambda: self.flip_ref_chkb(self.sample_checkBox.isChecked() and self.reference_checkBox.isChecked()))
+        sample_layout = QtWidgets.QHBoxLayout()
+        sample_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        sample_layout.addWidget(self.reference_checkBox)
+        sample_layout.addWidget(self.sample_checkBox)
+        sample_layout.addWidget(self.opt_checkBox)
+        sample_layout.addWidget(self.empty_checkBox)
+        sample_layout.addWidget(self.empty_scan_checkBox)
+        sample_layout.addSpacerItem(QtWidgets.QSpacerItem(10, 10, QtWidgets.QSizePolicy.Policy.Expanding,
+                                                                 QtWidgets.QSizePolicy.Policy.Minimum))
+
+        self.queue_add_pushButton = QtWidgets.QPushButton()
+        self.queue_add_pushButton.setText("Add to queue")
+        self.queue_manage_pushButton = QtWidgets.QPushButton()
+        self.queue_manage_pushButton.setText("Manage queue")
+        self.queue_start_pushButton = QtWidgets.QPushButton()
+        self.queue_start_pushButton.setText("Start scan queue")
+        queue_layout = QtWidgets.QHBoxLayout()
+        queue_layout.addWidget(self.queue_add_pushButton)
+        queue_layout.addWidget(self.queue_manage_pushButton)
+        queue_layout.addWidget(self.queue_start_pushButton)
+
         self.scan_start_pushButton = QtWidgets.QPushButton()
         self.scan_start_pushButton.setText("Start scan")
+
 
         self.message_label = QtWidgets.QLabel()
         self.message_label.setWordWrap(True)
@@ -900,8 +1041,11 @@ class ScanParametersWidget(QtWidgets.QWidget):
 
         self.scan_params_VLayout.addWidget(self.scan_params_label)
         self.scan_params_VLayout.addLayout(self.scan_params_gridLayout)
+        self.scan_params_VLayout.addWidget(self.scan_type_combobox)
         self.scan_params_VLayout.addLayout(time_layout)
         self.scan_params_VLayout.addLayout(random_layout)
+        self.scan_params_VLayout.addLayout(sample_layout)
+        self.scan_params_VLayout.addLayout(queue_layout)
         self.scan_params_VLayout.addWidget(self.scan_start_pushButton)
         self.scan_params_VLayout.addLayout(progress_layout)
 
@@ -910,6 +1054,14 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.radial_distance = 0
 
         self.set_scan(type)
+
+    def flip_sample_chkb(self,present):
+        self.empty_checkBox.setEnabled(present)
+        self.empty_scan_checkBox.setEnabled(present)
+        self.opt_checkBox.setEnabled(present)
+
+    def flip_ref_chkb(self,take_ref):
+        self.empty_checkBox.setEnabled(take_ref)
 
     def set_scan(self,scan_type):
         coordinates = ["X1", "X2", "X3"]
@@ -936,7 +1088,7 @@ class ScanParametersWidget(QtWidgets.QWidget):
             # if ir == 2 and scan_type in scan_type_list[1:4]:
             #     row[1].setText(f"{distance}")
 
-        if scan_type in scan_type_list[1:6]:
+        if scan_type in scan_type_list[1:]:
             row = self.extra_params_w_list
             row[0].setText("Distance")
             row[1].setText(f"{self.radial_distance}")
@@ -953,6 +1105,70 @@ class ScanParametersWidget(QtWidgets.QWidget):
         else:
             for w in self.params_rows[4][:]:
                 w.setVisible(True)
+
+class QueueDialog(QtWidgets.QDialog):
+    def __init__(self,queue_list, parent=None):
+        super(QueueDialog, self).__init__(parent)
+
+        self.queue_list = queue_list
+        self.queue_list_copy = queue_list.copy()
+
+        self.HLayout =QtWidgets.QHBoxLayout(self)
+        self.scan_table = QtWidgets.QTableWidget()
+
+        self.scan_table.setRowCount(len(self.queue_list))
+        header_labels = ["Type",
+                         "x1 min", "x1 max", "x1 points",
+                         "x2 min", "x2 max", "x2 points",
+                         "x3 min", "x3 max", "x3 points"]
+        self.scan_table.setColumnCount(len(header_labels))
+        self.scan_table.setHorizontalHeaderLabels(header_labels)
+
+        self.row_up_pushButton = QtWidgets.QPushButton()
+        self.row_up_pushButton.setText("Move up")
+        self.row_down_pushButton = QtWidgets.QPushButton()
+        self.row_down_pushButton.setText("Move down")
+        self.row_delete_pushButton = QtWidgets.QPushButton()
+        self.row_delete_pushButton.setText("Delete")
+        self.queue_clear_pushButton = QtWidgets.QPushButton()
+        self.queue_clear_pushButton.setText("Clear queue")
+        self.cancel_pushButton = QtWidgets.QPushButton()
+        self.cancel_pushButton.setText("Cancel changes")
+        self.queue_save_pushButton = QtWidgets.QPushButton()
+        self.queue_save_pushButton.setText("Save queue to file")
+        self.queue_load_pushButton = QtWidgets.QPushButton()
+        self.queue_load_pushButton.setText("Load queue from file")
+        # self.queue_start_pushButton = QtWidgets.QPushButton()
+        # self.queue_start_pushButton.setText("Start queued scans")
+
+        button_layout = QtWidgets.QVBoxLayout()
+        for button in [self.row_up_pushButton,self.row_down_pushButton,
+                       self.row_delete_pushButton,self.queue_clear_pushButton,
+                       self.cancel_pushButton,
+                       self.queue_save_pushButton,self.queue_load_pushButton]:
+            button_layout.addWidget(button)
+
+        self.HLayout.addWidget(self.scan_table)
+        self.HLayout.addLayout(button_layout)
+
+    def update_table(self, queue_list):
+
+        self.queue_list = queue_list
+        self.scan_table.setRowCount(len(self.queue_list))
+        for i, (points, pars) in enumerate(self.queue_list):
+            type = QtWidgets.QTableWidgetItem(pars["scan_type"])
+            self.scan_table.setItem(i, 0, type)
+            for j in range(3):
+                for k in range(3):
+                    key = f"x{j+1}_{["min","max","steps"][k]}"
+                    if key in pars.keys():
+                        item = QtWidgets.QTableWidgetItem(str(pars[key]))
+                    else:
+                        item = QtWidgets.QTableWidgetItem("-")
+                    self.scan_table.setItem(i, 1+j*3+k, item)
+
+    def store_backup_copy(self, queue_list):
+        self.queue_list_copy = queue_list.copy()
 
 
 class VNAParametersWidget(QtWidgets.QWidget):
@@ -1409,6 +1625,14 @@ class MainWindow(QtWidgets.QMainWindow):
     send_acquisition_time = QtCore.pyqtSignal(float)
     send_tool_plane = QtCore.pyqtSignal(bool)
     send_tool_rotation = QtCore.pyqtSignal(float,float,float,float)
+    send_sh_to_init = QtCore.pyqtSignal()
+    send_sh_to_alt = QtCore.pyqtSignal()
+    send_sh_set_init_to_current = QtCore.pyqtSignal()
+    send_sh_sample_angle = QtCore.pyqtSignal(float,float,float)
+    send_sh_settle_time = QtCore.pyqtSignal(float)
+    send_sh_acquisition_time = QtCore.pyqtSignal(float)
+    sample_position_optimization_started = QtCore.pyqtSignal(bool)
+    # send_new_sh_init_pose = QtCore.pyqtSignal(tuple)
 
     def __init__(self, *args, obj=None, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
@@ -1422,6 +1646,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.vna_parameters_widget.setEnabled(False)
         self.vna_plot_w.setEnabled(False)
 
+        self.take_reference = True
+        self.sample_present = True
+
         self.movement_lock = threading.Lock()
 
         self.previous_time = 0
@@ -1430,6 +1657,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.robot_connected = False
         self.scan_finished = False
+        self.scan_was_queued = False
         for w in (self.manualCTab,self.scan_parameters_widget, self.scan_plot_w, self.slice_plot_w):
             w.setEnabled(False)
 
@@ -1472,6 +1700,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_controls_widget.set_E_plane_pushButton.clicked.connect(lambda: self.set_plane_button_clicked(1))
         self.robot_controls_widget.set_H_plane_pushButton.clicked.connect(lambda: self.set_plane_button_clicked(0))
         self.robot_controls_widget.set_tool_rotation_pushButton.clicked.connect(self.set_tool_rotation)
+
+        for sample_par_checkbox in [self.scan_parameters_widget.reference_checkBox,
+                                    self.scan_parameters_widget.sample_checkBox,
+                                    self.scan_parameters_widget.opt_checkBox,
+                                    self.scan_parameters_widget.empty_checkBox,
+                                    self.scan_parameters_widget.empty_scan_checkBox]:
+            sample_par_checkbox.clicked.connect(self.sample_settings_changed)
+
+
+        self.queued_scans = []
+        self.queue_manage_dialog = QueueDialog(self.queued_scans)
+        self.scan_parameters_widget.queue_add_pushButton.clicked.connect(lambda: self.scan_general(add_to_queue=True))
+        self.scan_parameters_widget.queue_manage_pushButton.clicked.connect(self.open_queue_manage_dialog)
+        self.scan_parameters_widget.queue_start_pushButton.clicked.connect(self.start_queued_scans_button_clicked)
+        self.queue_manage_dialog.queue_clear_pushButton.clicked.connect(self.clear_queue_button_clicked)
+        self.queue_manage_dialog.row_up_pushButton.clicked.connect(lambda: self.modify_queue_item_button_clicked("+"))
+        self.queue_manage_dialog.row_down_pushButton.clicked.connect(lambda: self.modify_queue_item_button_clicked("-"))
+        self.queue_manage_dialog.row_delete_pushButton.clicked.connect(lambda: self.modify_queue_item_button_clicked("0"))
+        self.queue_manage_dialog.cancel_pushButton.clicked.connect(self.cancel_queue_modifications_button_clicked)
+        self.queue_manage_dialog.queue_save_pushButton.clicked.connect(
+            lambda: pickle.dump(self.queued_scans,open(QtWidgets.QFileDialog.getSaveFileName(
+                self, 'Save file',self.form_filename()+
+                                  ("_" if (self.form_filename() and self.file_widget.filename_textbox.text()) else "")+
+                                  self.file_widget.filename_textbox.text(),"Pickled queue file (*.pklq)")[0],'wb'),protocol=pickle.HIGHEST_PROTOCOL))
+        self.queue_manage_dialog.queue_load_pushButton.clicked.connect(lambda: self.load_queue_button_clicked(
+            QtWidgets.QFileDialog.getOpenFileName(self, 'Open file', r'c:\\Users\giguv\Desktop\skuggsja-scan',"Pickled queue file (*.pklq)")[0]))
 
         self.scan_parameters_widget.scan_start_pushButton.clicked.connect(self.begin_scan)
 
@@ -1604,15 +1858,28 @@ class MainWindow(QtWidgets.QMainWindow):
         for i, x in enumerate(self.scan_init):
             w_list[i//3][(i%3)*2+1].setText(f"{x:.3f}")
 
+    def sample_settings_changed(self):
+        self.configs.scan_settings["take_reference_measurement"] = self.scan_parameters_widget.reference_checkBox.isChecked()
+        self.configs.scan_settings["sample_present"] = self.scan_parameters_widget.sample_checkBox.isChecked()
+        self.configs.scan_settings["optimize_sample_orientation"] = self.scan_parameters_widget.opt_checkBox.isChecked()
+        self.configs.scan_settings["take_reference_empty_measurement"] = self.scan_parameters_widget.empty_checkBox.isChecked() and self.scan_parameters_widget.reference_checkBox.isChecked()
+        self.configs.scan_settings["restart_the_scan_without_the_sample"]= self.scan_parameters_widget.empty_scan_checkBox.isChecked()
+
     @QtCore.pyqtSlot()
     @movement_wrapper
     def begin_scan(self):
         # x = threading.Thread(target=self.test_scan)
         # x = QtCore.QThread
-        # x.start()
+        self.scan_was_queued = False
         self.set_robot_speed()
-        self.scan_started = 1
-        self.scan_general()
+        # self.robot_rdk.setCollisionActive(COLLISION_ON)
+        self.reference_measurements = {}
+        if self.configs.scan_settings["take_reference_measurement"]:
+            self.reference_routine(sample_present=self.configs.scan_settings["sample_present"])
+        # x.start()
+        else:
+            self.scan_started = 1
+            self.scan_general()
         # if self.scan_type_combobox.currentText() == scan_type_list[0]:
         #     self.scan_xyz()
         # elif self.scan_type_combobox.currentText() in scan_type_list[1:3]:
@@ -1622,12 +1889,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.test_scan()
 
     @movement_wrapper
-    def scan_general(self):
+    def scan_general(self, add_to_queue=False):
         try:
             points_axes = []
             shape = []
             par_dict = {}
-            type = self.scan_type_combobox.currentText()
+            type = self.scan_parameters_widget.scan_type_combobox.currentText()
             par_dict["scan_type"] = type
             self.update_estimated_scan_time()
             for ip, param in enumerate(self.scan_parameters_widget.params_rows[2:]):
@@ -1639,8 +1906,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 shape.append(steps)
                 points_axes.append(np.linspace(min, max, steps))
             self.scan_coords = points_axes
+            for c_i,c_xi in enumerate(points_axes):
+                par_dict[f"x{c_i+1}_min"] = float(c_xi[0])
+                par_dict[f"x{c_i + 1}_max"] = float(c_xi[-1])
+                par_dict[f"x{c_i + 1}_span"] = float(abs(c_xi[0]-c_xi[-1]))
+                par_dict[f"x{c_i + 1}_res"] = float(abs(c_xi[0] - c_xi[-1]))/c_xi.size
+                par_dict[f"x{c_i + 1}_steps"] = c_xi.size
             self.delta = []
-            if type in scan_type_list[1:6]:
+            if type in scan_type_list[1:]:
                 par_dict["distance"] = float(self.scan_parameters_widget.extra_params_w_list[1].text())
             if self.vna_connected:
                 shape.append(len(self.freq_arr))
@@ -1680,6 +1953,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         if type in scan_type_list[1:3]:
                             c_tuple = (x1, x2, x3)
                         self.scanpoint_data.append({'c': (x1, x2, x3), 'i': (i1, i2, i3), 'd': (dir_1, dir_2, dir_3), "settings" : par_dict})
+                        # self.scanpoint_data.append({'c': (x1, x2, x3), 'i': (i1, i2, i3), 'd': (dir_1, dir_2, dir_3)})
+
                     dir_1 *= -1
                 dir_2 *= -1
 
@@ -1692,8 +1967,11 @@ class MainWindow(QtWidgets.QMainWindow):
             if par_dict["random_order"] == True:
                 random.shuffle(self.scanpoint_data)
 
-
-            self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'], self.scanpoint_data[0]['i'],
+            if add_to_queue:
+                self.queued_scans.append((self.scanpoint_data,par_dict))
+                self.queue_manage_dialog.update_table(self.queued_scans)
+            else:
+                self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'], self.scanpoint_data[0]['i'],
                                                 self.scanpoint_data[0]['d'], {**par_dict,"initial":True})
 
             for key in par_dict:
@@ -1807,6 +2085,115 @@ class MainWindow(QtWidgets.QMainWindow):
     #         # print(self.data)
     #     except ValueError as err:
     #         print('Inputted value is invalid\n' + str(err))
+    def open_queue_manage_dialog(self):
+        self.queue_manage_dialog.update_table(self.queued_scans)
+        self.queue_manage_dialog.store_backup_copy(self.queued_scans)
+        self.queue_manage_dialog.exec()
+
+    def start_queued_scans_button_clicked(self):
+        self.scan_was_queued = True
+        self.current_position_in_queue = 0
+        self.reference_measurements = {}
+        self.configs.scan_settings["queue_id"] = f"{random.randint(0,100000):5.0f}"
+        if self.configs.scan_settings["take_reference_measurement"]:
+            self.reference_routine(sample_present=self.configs.scan_settings["sample_present"])
+        # x.start()
+        else:
+            self.scan_started = 1
+            self.iterate_through_queued_scans()
+
+    def clear_queue_button_clicked(self):
+        self.queued_scans = []
+        self.queue_manage_dialog.update_table(self.queued_scans)
+
+    def modify_queue_item_button_clicked(self,mode=None):
+        clicked_index = self.queue_manage_dialog.scan_table.currentRow()
+        if mode == "+" and clicked_index >0 :
+            self.queued_scans[clicked_index], self.queued_scans[clicked_index-1] =(
+                self.queued_scans[clicked_index-1], self.queued_scans[clicked_index])
+            clicked_index -=1
+        if mode == "-" and clicked_index < len(self.queued_scans)-1:
+            self.queued_scans[clicked_index], self.queued_scans[clicked_index+1] =(
+                self.queued_scans[clicked_index+1], self.queued_scans[clicked_index])
+            clicked_index +=1
+        if mode == "0" and self.queued_scans != []:
+            self.queued_scans.pop(clicked_index)
+        else:
+            pass
+        self.queue_manage_dialog.update_table(self.queued_scans)
+        self.queue_manage_dialog.scan_table.setCurrentItem(self.queue_manage_dialog.scan_table.item(clicked_index,self.queue_manage_dialog.scan_table.currentColumn()))
+
+    def cancel_queue_modifications_button_clicked(self):
+        self.queued_scans = self.queue_manage_dialog.queue_list_copy.copy()
+        self.queue_manage_dialog.update_table(self.queued_scans)
+
+    def load_queue_button_clicked(self, filename):
+        if filename != '':
+            self.queued_scans = pickle.load(open(filename,"rb"))
+            self.queue_manage_dialog.update_table(self.queued_scans)
+            par_dict = self.queued_scans[-1][1]
+            self.scan_parameters_widget.scan_type_combobox.setCurrentIndex(scan_type_list.index(par_dict['scan_type']))
+            if par_dict['scan_type'] in scan_type_list[1:6]:
+                self.scan_parameters_widget.extra1_lineEdit.setText(str(par_dict[f"distance"]))
+            for ip, param in enumerate(self.scan_parameters_widget.params_rows[2:]):
+                param[1].setText(str(par_dict[f"x{ip+1}_min"]))
+                param[3].setText(str(par_dict[f"x{ip+1}_max"]))
+                param[5].setText(str(par_dict[f"x{ip + 1}_steps"]))
+            self.scan_parameters_widget.sttl_lineEdit.setText(str(par_dict[f"settle_time"]))
+    def iterate_through_queued_scans(self):
+        self.scan_started = 1
+        self.scanpoint_data = self.queued_scans[self.current_position_in_queue][0]
+        par_dict = self.queued_scans[self.current_position_in_queue][1]
+
+        points_axes = []
+        shape = []
+        for c_i in range(3):
+            shape.append(par_dict[f"x{c_i+1}_steps"])
+            points_axes.append(np.linspace(par_dict[f"x{c_i+1}_min"] ,
+                                           par_dict[f"x{c_i+1}_max"] ,
+                                           par_dict[f"x{c_i+1}_steps"]))
+        self.scan_coords = points_axes
+        self.delta = []
+        if self.vna_connected:
+            shape.append(len(self.freq_arr))
+            self.instr.write_bool("INITiate:CONTinuous:ALL", False)
+
+        self.data = np.empty(shape, dtype=complex)
+        shape2 = shape[:-1] if self.vna_connected else shape
+        self.data_robot_positions = np.empty(shape2, dtype=np.dtype('U250'))
+        self.data_robot_positions_measured = np.empty(shape2, dtype=np.dtype('U250'))
+        self.data_robot_joints = np.empty(shape2, dtype=np.dtype('U250'))
+        self.data_time = np.empty(shape2, dtype=np.dtype('f8'))
+        self.data[:] = np.nan
+        if self.vna_connected:
+            self.scan_plot_initialize()
+            self.slice_plot_initialize()
+            self.update_coord_slider()
+
+        self.scanpoint_index = 0
+
+        self.configs.scan_settings["start_time"] = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S")
+        self.configs.scan_settings["start_time_s"] = time.time_ns() / 1e9
+
+        self.send_settle_time.emit(par_dict["settle_time"])
+        if self.vna_connected:
+            # self.send_acquisition_time.emit(par_dict["acquisition_time"])
+            par_dict["acquisition_time"] = float(self.scan_parameters_widget.acq_labelFramed.text())
+            self.send_acquisition_time.emit(par_dict["acquisition_time"])
+
+        if self.configs.scan_settings["sample_present"] and self.configs.scan_settings["take_reference_measurement"]:
+            self.save_reference_data("Sample")
+            self.save_reference_data(f"Sample_queue{self.current_position_in_queue}")
+        elif not self.configs.scan_settings["sample_present"] and self.configs.scan_settings["take_reference_measurement"]:
+            self.save_reference_data("Empty")
+            self.save_reference_data(f"Empty_queue{self.current_position_in_queue}")
+
+        self.send_movement_coords_scan.emit(self.scanpoint_data[0]['c'], self.scanpoint_data[0]['i'],
+                                            self.scanpoint_data[0]['d'], {**par_dict, "initial": True})
+        for key in par_dict:
+            self.configs.scan_settings[key] = par_dict[key]
+        self.read_misc_configs()
+        self.current_position_in_queue +=1
 
     @QtCore.pyqtSlot(tuple, tuple, bool)
     def scan_data_add_point(self, index_tuple, dir_tuple, skip = False):
@@ -1821,7 +2208,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # TODO: select trace to measure
             # print(skip)
             if not skip:
-                data_point = self.query_data(1,raw=True)
+                data_point = self.query_data(self.configs.data_trace,raw=True)
             else:
                 data_point = np.NAN
             self.data[current_point][:] = data_point
@@ -1904,11 +2291,96 @@ class MainWindow(QtWidgets.QMainWindow):
             self.scan_plot_w.checkbox_fft.setEnabled(True)
 
         if SAVE_ON_SCAN_END:
-            self.save_data_file(current_time)
+            if self.run_on_robot or SAVE_WHEN_SIMULATED:
+                self.file_widget.button_save_file.clicked.emit()
+
+        if self.scan_was_queued:
+            if len(self.queued_scans)>1 and self.current_position_in_queue<len(self.queued_scans):
+                self.iterate_through_queued_scans()
+            # self.save_data_file(current_time)
+
+    def reference_routine(self,sample_present):
+        # self.reference_measurements = {}
+        if self.vna_connected:
+            self.instr.write_bool("INITiate:CONTinuous:ALL", False)
+            if sample_present:
+                self.send_sh_acquisition_time.emit(float(self.scan_parameters_widget.acq_labelFramed.text()))
+                if self.configs.scan_settings["take_reference_empty_measurement"]:
+                    self.send_sh_settle_time.emit(1)
+                    self.send_sh_to_alt.emit()
+                elif self.configs.scan_settings["optimize_sample_orientation"]:
+                    self.send_sh_settle_time.emit(float(self.scan_parameters_widget.sttl_lineEdit.text()))
+                    self.sample_position_optimization_started.emit(True)
+                else:
+                    self.save_reference_data("Sample")
+                    self.scan_started = 1
+                    if self.scan_was_queued:
+                        self.iterate_through_queued_scans()
+                    else:
+                        self.scan_general()
+                # if self.configs.scan_settings["optimize_sample_orientation"]:
+                #     opt_args = (1, 0, 5, 3)
+                #     pos_opt = sp.optimize.minimize(self.move_sample_and_measure_reflection, (0, 0), method='Powell',
+                #                                    args=opt_args,
+                #                                    options={"maxiter": 40, "ftol" : 1e-4})
+                #     print(pos_opt)
+                #     self.configs.sample_holder_settings["joints_opt"] = self.robot_rdk.sample_holder.Joints().list()
+                #     self.configs.sample_holder_settings["pose_opt"] = robomath.Pose_2_Staubli(self.robot_rdk.sample_holder.Pose())
+                #     self.configs.sample_holder_settings["angle_opt"] = pos_opt.x
+                #     self.send_sh_set_init_to_current.emit()
+                # self.save_reference_data("Sample")
+                # if self.configs.scan_settings["take_reference_empty_measurement"]:
+                #     self.send_sh_to_alt.emit()
+                # else:
+                #     self.scan_started = 1
+                #     self.scan_general()
+            else:
+                self.save_reference_data("Empty")
+                self.scan_started = 1
+                if self.scan_was_queued:
+                    self.iterate_through_queued_scans()
+                else:
+                    self.scan_general()
+
+    @QtCore.pyqtSlot(tuple)
+    def reference_routine_sample_position_optimised(self,pos_opt_x):
+        print(pos_opt_x)
+        self.configs.sample_holder_settings["joints_opt"] = self.robot_rdk.sample_holder.Joints().list()
+        self.configs.sample_holder_settings["pose_opt"] = robomath.Pose_2_Staubli(self.robot_rdk.sample_holder.Pose())
+        self.configs.sample_holder_settings["angle_opt"] = pos_opt_x
+        self.send_sh_set_init_to_current.emit()
+        self.save_reference_data("Sample")
+        self.scan_started = 1
+        if self.scan_was_queued:
+            self.iterate_through_queued_scans()
+        else:
+            self.scan_general()
 
 
     @QtCore.pyqtSlot()
+    def reference_routine_sample_away(self):
+        self.save_reference_data("Empty")
+        self.send_sh_to_init.emit()
+        time.sleep(1)
+        if self.configs.scan_settings["optimize_sample_orientation"]:
+            # self.send_sh_settle_time.emit(0.1)
+            self.send_sh_settle_time.emit(float(self.scan_parameters_widget.sttl_lineEdit.text()))
+            self.sample_position_optimization_started.emit(True)
+        else:
+            self.save_reference_data("Sample")
+            self.scan_started = 1
+            if self.scan_was_queued:
+                self.iterate_through_queued_scans()
+            else:
+                self.scan_general()
+
+    def save_reference_data(self,prefix):
+        self.reference_measurements[f"{prefix}_S21"] = self.query_data(ch=self.configs.data_trace,raw=1)
+        self.reference_measurements[f"{prefix}_S11"] = self.query_data(ch=self.configs.reflection_trace, raw=1)
+
+    @QtCore.pyqtSlot()
     def trigger_VNA(self):
+        # print(time.thread_time())
         if self.vna_connected:
             self.instr.write("INITiate:IMMediate:ALL")
 
@@ -1958,7 +2430,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             elif type(filename) == tuple:
                 filename = ".".join(filename[0].split(".")[:-1])
-
+            # self.configs.save_toml(f"{filename}.toml")
             with h5py.File(f"{filename}.hdf5", 'w') as f:
                 data = f.create_dataset("data", data=self.data, chunks=True,track_order=True)
                 coords = f.create_group("coords",track_order=True)
@@ -1998,6 +2470,16 @@ class MainWindow(QtWidgets.QMainWindow):
                         f.create_dataset("joints", data=robot_parse_ASCII_v(self.data_robot_joints)[:,:,:,:-6])
                 except AttributeError as err:
                     print("Error while saving position data: "+err)
+
+                if self.take_reference:
+                    try:
+                        ref = f.create_group("reference", track_order=True)
+                        # for key in self.configs.sample.keys():
+                        # for key in self.configs.sample_holder_settings.keys():
+                        for key in self.reference_measurements.keys():
+                            ref.create_dataset(key, data=self.reference_measurements[key])
+                    except AttributeError:
+                        print("Error while saving reference data")
 
 
 
@@ -2139,6 +2621,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.change_statusbar_color()
                 self.set_robot_speed()
 
+                self.scan_parameters_widget.reference_checkBox.setChecked(self.configs.scan_settings["take_reference_measurement"])
+                self.scan_parameters_widget.sample_checkBox.setChecked(self.configs.scan_settings["sample_present"])
+                self.scan_parameters_widget.opt_checkBox.setChecked(self.configs.scan_settings["optimize_sample_orientation"])
+                self.scan_parameters_widget.empty_checkBox.setChecked(self.configs.scan_settings["take_reference_empty_measurement"])
+                self.scan_parameters_widget.empty_scan_checkBox.setChecked(self.configs.scan_settings["restart_the_scan_without_the_sample"])
+
                 self.robot_establish_connection()
                 if self.configs.sample_holder_settings["on_init"]:
                     self.sample_holder_establish_connection()
@@ -2177,6 +2665,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.connect_sh_signals()
         self.worker_sh_thread.start()
 
+        self.worker_opt_thread = QtCore.QThread()
+        self.worker_opt = OptimizationThread()
+        self.worker_opt.moveToThread(self.worker_opt_thread)
+        self.connect_opt_signals()
+        self.worker_opt_thread.start()
+        if self.vna_connected:
+            self.worker_opt.set_vna_params(self.instr, self.configs.reflection_trace)
+
 
     def connect_robot_signals(self):
         self.send_movement_coords_scan.connect(self.worker.move_robot_to_point_scan)
@@ -2200,8 +2696,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def connect_sh_signals(self):
         self.worker.rotate_sample.connect(self.worker_sh.rotate_sample_by_angle)
-        pass
-        # self.worker_sh.finished_movement.connect()
+        self.worker.move_sample.connect(self.worker_sh.move_sample_in_plane)
+        self.send_sh_to_alt.connect(self.worker_sh.send_sample_holder_away)
+        self.send_sh_to_init.connect(self.worker_sh.move_robot_to_init)
+        self.worker_sh.holder_position_changed.connect(self.reference_routine_sample_away)
+        self.worker_sh.ready_for_acquisition.connect(self.trigger_VNA)
+        self.send_sh_sample_angle.connect(self.worker_sh.rotate_sample_by_angle)
+        self.send_sh_set_init_to_current.connect(self.worker_sh.set_init_to_current)
+        self.send_sh_settle_time.connect(self.worker_sh.set_settle_time)
+        self.send_sh_acquisition_time.connect(self.worker_sh.set_acquisition_time)
+
+        # self.send_new_sh_init_pose.connect(self.worker_sh.)
+
+    def connect_opt_signals(self):
+        self.worker_opt.send_sh_sample_angle.connect(self.worker_sh.rotate_sample_by_angle)
+        self.sample_position_optimization_started.connect(self.worker_opt.optimization_request_received)
+        self.worker_opt.send_optimized_position.connect(self.reference_routine_sample_position_optimised)
+
 
     def change_statusbar_color(self):
         if self.robot_connected:
@@ -2261,6 +2772,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.connection_widget.con_vna_pushButton.setStyleSheet("background-color: red")
                 self.update_VNA_settings()
                 self.trace_plot_initialize()
+                if hasattr(self,"worker_opt"):
+                    self.worker_opt.set_vna_params(self.instr,self.configs.reflection_trace)
             except RsInstrument.RsInstrException:
                 print("no")
                 self.append_log("Connection Failed")
@@ -2429,7 +2942,10 @@ class MainWindow(QtWidgets.QMainWindow):
         Also saves the current settings to the latest_settings.toml file."""
         self.configs.VNA_settings["bandwidth"] = self.instr.query_float('SENSe:BAND?')
         self.configs.VNA_settings["point_number"] = self.instr.query_int('SWEep:POINts?')
-        self.configs.VNA_settings["time_per_sweep"] = self.instr.query_float('SWEep:TIMe?')
+        self.configs.VNA_settings["time_per_sweep"] = self.instr.query_float('SWEep:TIMe?')*2
+        print(self.instr.query_float('SWEep:TIMe?'))
+        print(self.instr.query_float('SWEep:CTIMing:CHANnel?')*self.instr.query_float('SWEep:POINts?') )
+        print(self.instr.query_float('SWEep:TIMe?')+self.instr.query_float('SWEep:CTIMing:CHANnel?'))
         self.configs.VNA_settings["averaged_samples"] = self.instr.query_int('AVERage:COUNt?')
         self.configs.VNA_settings["minimum_frequency"] = self.instr.query_int('FREQuency:STARt?')
         self.configs.VNA_settings["maximum_frequency"] = self.instr.query_int('FREQuency:STOP?')
@@ -2460,7 +2976,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             sweep_time = 0
             if self.vna_connected:
-                sweep_time = self.instr.query_float('SWEep:TIMe?')
+                sweep_time = self.instr.query_float('SWEep:TIMe?')*2
                 self.scan_parameters_widget.acq_labelFramed.setText(f"{sweep_time:.2f}")
             points = np.prod([int(x[5].text()) for x in self.scan_parameters_widget.params_rows[2:]])
             total_time = (float(self.scan_parameters_widget.sttl_lineEdit.text())+sweep_time)*points
@@ -2506,7 +3022,7 @@ class MainWindow(QtWidgets.QMainWindow):
         coord_2 = self.scan_coords[self.coord_dict[slice_plane[1]]]
         self.scan_plot_w.ax_scan.set_xlabel(f"Position along ${slice_plane[0].lower()}$, mm")
         self.scan_plot_w.ax_scan.set_ylabel(f"Position along ${slice_plane[1].lower()}$, mm")
-        if self.scan_type_combobox.currentText() == "Spherical scan":
+        if self.scan_parameters_widget.scan_type_combobox.currentText() == "Spherical scan":
             self.scan_plot_w.ax_scan.set_xlabel(f"Azimuth, degrees")
             self.scan_plot_w.ax_scan.set_ylabel(f"Elevation, degrees")
         scan_slice = self.return_scan_slice(slice_plane,self.scan_plot_w.coordinate_slider.value(),self.scan_plot_w.frequency_slider.value())
@@ -2574,7 +3090,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # kz2= k0**2-kx**2-ky**2
             # kz2[kz2<0] = 0
             # kz = np.sqrt(kz2)
-            if self.scan_type_combobox.currentText() in scan_type_list[1:4]:
+            if self.scan_parameters_widget.scan_type_combobox.currentText() in scan_type_list[1:6]:
                 kz = np.emath.sqrt(k0**2)
             else:
                 kz = np.emath.sqrt(k0**2-kx**2-ky**2)
@@ -2833,13 +3349,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_parameters_widget = ScanParametersWidget()
 
         self.xyzS_VLayout.addWidget(self.scan_parameters_widget)
+        self.scan_parameters_widget.scan_type_combobox.currentTextChanged.connect(lambda: update_scan_type(self.scan_parameters_widget.scan_type_combobox.currentText()))
 
-        self.scan_types = scan_type_list
-        self.scan_type_combobox = QtWidgets.QComboBox(parent=self)
-        self.scan_type_combobox.addItems(self.scan_types)
-        self.scan_type_combobox.currentTextChanged.connect(lambda: update_scan_type(self.scan_type_combobox.currentText()))
 
-        self.xyzS_VLayout.addWidget(self.scan_type_combobox)
         spacerItem3 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum,
                                             QtWidgets.QSizePolicy.Policy.Expanding)
         self.attr_widget = AttributeWidget()
@@ -2850,7 +3362,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
         self.vna_parameters_widget = VNAParametersWidget()
-        self.xyzS_VLayout.addWidget(self.vna_parameters_widget)
+        # self.xyzS_VLayout.addWidget(self.vna_parameters_widget)
 
         self.xyzS_HLayout = QtWidgets.QHBoxLayout()
 

@@ -6,8 +6,11 @@ from PyQt6.QtCore import QTimer
 import numpy as np
 import threading
 class RDK_KUKA(Robolink):
+    TIMEOUT = 60
+    # NODELAY = True
     def __init__(self, coordinates = None, joints = None, obstacles=None,sample_holder_args = None, *args, **kargs):
         super(RDK_KUKA, self).__init__(*args, **kargs)
+        self._setTimeout(60)
         self.sample_holder_in_workpace = False
         self.robot = self.Item('KUKA KR 6 R900-2', ITEM_TYPE_ROBOT)
         if not self.robot.Valid():
@@ -16,7 +19,7 @@ class RDK_KUKA(Robolink):
             self.AddFile("w_band_mount.tool")
             self.robot = self.Item('KUKA KR 6 R900-2', ITEM_TYPE_ROBOT)
             # self.robot = self.ItemUserPick('KUKA KR 6 R700 sixx', ITEM_TYPE_ROBOT)
-            self.robot.setPoseTool(self.robot.PoseTool()*rotz(pi))
+            # self.robot.setPoseTool(self.robot.PoseTool()*rotz(pi))
             # self.robot.setPoseTool(self.robot.PoseTool() * rotz(-pi/2))
             self.robot.setVisible(1, VISIBLE_ROBOT_DEFAULT and not VISIBLE_ROBOT_FLANGE)
             self.robot.setSpeed(-1,20)  # Set linear speed in mm/s, joints speed in deg/s
@@ -41,6 +44,7 @@ class RDK_KUKA(Robolink):
         self.tool = self.Item("w_band_mount", ITEM_TYPE_TOOL)
         self.robot.setPoseFrame(self.robot.Parent())
         self.setCollisionActivePair(COLLISION_OFF, self.tool, self.robot.ObjectLink(6))
+        # self.setCollisionActive(COLLISION_ON)
         # self.AddFile("opticbench.STEP")
 
         self.target_init = self.Item('Target initial')
@@ -93,6 +97,7 @@ class RDK_KUKA(Robolink):
                 self.sample_holder.setJoints(joints)
 
             self.AddTarget('Target holder initial',self.sample_holder.Parent())
+            self.AddTarget('Target holder manual', self.sample_holder.Parent())
             self.AddTarget('Target holder away', self.sample_holder.Parent())
             self.AddTarget('Target holder rotation', self.sample_holder.Parent())
             self.AddTarget('Target holder rotation initial', self.sample_holder.Parent())
@@ -107,12 +112,15 @@ class RDK_KUKA(Robolink):
         self.target_holder_away.setAsJointTarget()
         self.target_holder_away.setJoints(joints_away)
         self.target_holder_away.setPose(self.sample_holder.SolveFK(joints_away))
-        self.target_holder_rot = self.Item('Target holder rotation')
-        self.target_holder_rot.setRobot(self.sample_holder)
-        self.target_holder_rot.setPose(self.sample_holder.Pose())
-        self.target_holder_rot_init = self.Item('Target holder rotation initial')
-        self.target_holder_rot_init.setRobot(self.sample_holder)
-        self.target_holder_rot_init.setPose(self.sample_holder.Pose())
+        self.target_holder_rel = self.Item('Target holder manual')
+        self.target_holder_rel.setRobot(self.sample_holder)
+        self.target_holder_rel.setPose(self.sample_holder.Pose())
+        self.target_holder_scan = self.Item('Target holder rotation')
+        self.target_holder_scan.setRobot(self.sample_holder)
+        self.target_holder_scan.setPose(self.sample_holder.Pose())
+        self.target_holder_scan_init = self.Item('Target holder rotation initial')
+        self.target_holder_scan_init.setRobot(self.sample_holder)
+        self.target_holder_scan_init.setPose(self.sample_holder.Pose())
         self.sample_holder_in_workpace = True
 
 
