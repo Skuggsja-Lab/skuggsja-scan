@@ -162,14 +162,14 @@ class RobotMovementObject(QtCore.QObject):
     def alt_initial_values(self):
         pass
 
-    @QtCore.pyqtSlot(bool)
-    def set_plane(self,E_plane = False):
-        if E_plane:
-            self.robot.setPoseTool(self.rdk_instance.default_pose_tool*robomath.rotz(-np.pi/2*self.E_plane_direction))
-            self.E_plane = 1
-        else:
-            self.robot.setPoseTool(self.rdk_instance.default_pose_tool)
-            self.E_plane = 0
+    # @QtCore.pyqtSlot(bool)
+    # def set_plane(self,E_plane = False):
+    #     if E_plane:
+    #         self.robot.setPoseTool(self.rdk_instance.default_pose_tool*robomath.rotz(-np.pi/2*self.E_plane_direction))
+    #         self.E_plane = 1
+    #     else:
+    #         self.robot.setPoseTool(self.rdk_instance.default_pose_tool)
+    #         self.E_plane = 0
 
     @QtCore.pyqtSlot(float,float,float,float)
     def rotate_pose_tool(self,phi,az,el,z_phc):
@@ -182,7 +182,7 @@ class RobotMovementObject(QtCore.QObject):
     @QtCore.pyqtSlot(tuple,tuple,tuple,dict)
     @movement_wrapper_robot_internal
     def move_robot_to_point_scan(self,coord_tuple=None, index_tuple=None,
-                                 dir_tuple=None, settings= {"scan_type": scan_type_list[0],"distance":0,"random_approach":False,"initial":False}):
+                                 dir_tuple=None, settings= {"scan_type": scan_type_list[0],"distance":0,"random_approach":False,"initial":False, "polarization_angle":0}):
         if coord_tuple != None:
             self.began_movement.emit()
             scan_type = settings["scan_type"]
@@ -248,6 +248,7 @@ class RobotMovementObject(QtCore.QObject):
                                                       r * np.cos(np.deg2rad(azimuth))),
                                                   rx=0, ry=-azimuth)) * robomath.eye().Offset(x=0, y=0, z=0)
 
+            new_pose *= robomath.eye().Offset(x=0, y=0, z=0, rz = settings["polarization_angle"])
             self.t_scan.setPose(new_pose)
             # if not settings["initial"]:
             #     self.moveJointsSafe(new_pose, lin=(scan_type == scan_type_list[0]))
@@ -748,8 +749,8 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.robot_joint_accel_label = QtWidgets.QLabel()
         self.robot_joint_accel_lineEdit = QtWidgets.QLineEdit()
         self.position_reset_pushButton = QtWidgets.QPushButton()
-        self.set_H_plane_pushButton = QtWidgets.QPushButton()
-        self.set_E_plane_pushButton = QtWidgets.QPushButton()
+        # self.set_H_plane_pushButton = QtWidgets.QPushButton()
+        # self.set_E_plane_pushButton = QtWidgets.QPushButton()
         self.set_tool_rotation_pushButton = QtWidgets.QPushButton()
         self.set_scan_init_pushButton = QtWidgets.QPushButton()
         self.set_robot_speed_pushButton = QtWidgets.QPushButton()
@@ -791,8 +792,8 @@ class RobotControlsWidget(QtWidgets.QWidget):
         self.robot_joint_speed_lineEdit.setText("2")
         self.robot_joint_accel_lineEdit.setText("1")
         self.position_reset_pushButton.setText("Reset robot position")
-        self.set_H_plane_pushButton.setText("Set H plane")
-        self.set_E_plane_pushButton.setText("Set E plane")
+        # self.set_H_plane_pushButton.setText("Set H plane")
+        # self.set_E_plane_pushButton.setText("Set E plane")
         self.set_tool_rotation_pushButton.setText("Set tool rotation")
         self.set_scan_init_pushButton.setText("Set new scan origin point")
         self.set_robot_speed_pushButton.setText("Set robot speed")
@@ -837,9 +838,9 @@ class RobotControlsWidget(QtWidgets.QWidget):
                         self.tool_el_label,self.tool_el_lineEdit,self.tool_z_label,self.tool_z_lineEdit]
         for w in tool_widgets:
             HLayout_rotation.addWidget(w)
-        gridLayout_rotation.addWidget(self.set_H_plane_pushButton,1,1,1,1)
-        gridLayout_rotation.addWidget(self.set_E_plane_pushButton, 1, 2, 1, 1)
-        gridLayout_rotation.addWidget(self.set_tool_rotation_pushButton, 1, 3, 1, 3)
+        # gridLayout_rotation.addWidget(self.set_H_plane_pushButton,1,1,1,1)
+        # gridLayout_rotation.addWidget(self.set_E_plane_pushButton, 1, 2, 1, 1)
+        gridLayout_rotation.addWidget(self.set_tool_rotation_pushButton, 3, 3, 1, 3)
 
         self.VLayout.addLayout(gridLayout_movement)
         self.VLayout.addLayout(HLayout_speed)
@@ -943,6 +944,7 @@ class ScanParametersWidget(QtWidgets.QWidget):
         self.scan_types = scan_type_list
         self.scan_type_combobox = QtWidgets.QComboBox(parent=self)
         self.scan_type_combobox.addItems(self.scan_types)
+        self.extra_parameter_indices = {}
 
         self.sttl_label = QtWidgets.QLabel()
         self.sttl_label.setText("Settling time, s")
@@ -1052,6 +1054,7 @@ class ScanParametersWidget(QtWidgets.QWidget):
         size_policy = QtWidgets.QSizePolicy()
         self.setSizePolicy(size_policy)
         self.radial_distance = 0
+        self.polarization_angle = 0
 
         self.set_scan(type)
 
@@ -1087,24 +1090,36 @@ class ScanParametersWidget(QtWidgets.QWidget):
 
             # if ir == 2 and scan_type in scan_type_list[1:4]:
             #     row[1].setText(f"{distance}")
-
-        if scan_type in scan_type_list[1:]:
+        self.extra_parameter_indices = {"distance":None, "polarization":None}
+        extra_par_column = 0
+        if scan_type in scan_type_list[:]:
             row = self.extra_params_w_list
-            row[0].setText("Distance")
-            row[1].setText(f"{self.radial_distance}")
-            row[0].setVisible(True)
-            row[1].setVisible(True)
-        else:
-            for w in self.extra_params_w_list:
-                w.setVisible(False)
+            row[extra_par_column].setText("Polarization")
+            row[extra_par_column+1].setText(f"{self.polarization_angle}")
+            row[extra_par_column].setVisible(True)
+            row[extra_par_column+1].setVisible(True)
+            self.extra_parameter_indices["polarization"] = extra_par_column
+            extra_par_column+=2
+
+        if scan_type not in {scan_type_list[0],scan_type_list[2]}:
+            row = self.extra_params_w_list
+            row[extra_par_column].setText("Distance")
+            row[extra_par_column+1].setText(f"{self.radial_distance}")
+            row[extra_par_column].setVisible(True)
+            row[extra_par_column+1].setVisible(True)
+            self.extra_parameter_indices["distance"] = extra_par_column
+            extra_par_column+=2
 
         if scan_type == scan_type_list[2]:
-            for w in self.params_rows[4][:]+self.extra_params_w_list:
+            for w in self.params_rows[4][:]:
                 w.setVisible(False)
                 w.sizePolicy().setRetainSizeWhenHidden(True)
         else:
             for w in self.params_rows[4][:]:
                 w.setVisible(True)
+
+        for w in self.extra_params_w_list[extra_par_column:]:
+                w.setVisible(False)
 
 class QueueDialog(QtWidgets.QDialog):
     def __init__(self,queue_list, parent=None):
@@ -1697,8 +1712,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot_controls_widget.set_scan_init_pushButton.clicked.connect(self.set_scan_init_button_clicked)
         self.robot_controls_widget.set_robot_speed_pushButton.clicked.connect(self.set_robot_speed)
 
-        self.robot_controls_widget.set_E_plane_pushButton.clicked.connect(lambda: self.set_plane_button_clicked(1))
-        self.robot_controls_widget.set_H_plane_pushButton.clicked.connect(lambda: self.set_plane_button_clicked(0))
+        # self.robot_controls_widget.set_E_plane_pushButton.clicked.connect(lambda: self.set_plane_button_clicked(1))
+        # self.robot_controls_widget.set_H_plane_pushButton.clicked.connect(lambda: self.set_plane_button_clicked(0))
         self.robot_controls_widget.set_tool_rotation_pushButton.clicked.connect(self.set_tool_rotation)
 
         for sample_par_checkbox in [self.scan_parameters_widget.reference_checkBox,
@@ -1835,9 +1850,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.pyqtSlot()
     @movement_wrapper
-    def set_plane_button_clicked(self,Eplane):
-        self.configs.scan_settings["polarization"] = ('co','cx')[Eplane]
-        self.send_tool_plane.emit(Eplane)
+    # def set_plane_button_clicked(self,Eplane):
+    #     self.configs.scan_settings["polarization"] = ('co','cx')[Eplane]
+    #     self.send_tool_plane.emit(Eplane)
 
     def set_tool_rotation(self):
         try:
@@ -1914,7 +1929,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 par_dict[f"x{c_i + 1}_steps"] = c_xi.size
             self.delta = []
             if type in scan_type_list[1:]:
-                par_dict["distance"] = float(self.scan_parameters_widget.extra_params_w_list[1].text())
+                par_dict["distance"] = float(self.scan_parameters_widget.extra_params_w_list[self.scan_parameters_widget.extra_parameter_indices["distance"]+1].text())
+            if self.scan_parameters_widget.extra_parameter_indices["polarization"] != None:
+                par_dict["polarization_angle"] = float(self.scan_parameters_widget.extra_params_w_list[self.scan_parameters_widget.extra_parameter_indices["polarization"]+1].text())
             if self.vna_connected:
                 shape.append(len(self.freq_arr))
                 self.instr.write_bool("INITiate:CONTinuous:ALL", False)
@@ -2680,7 +2697,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.send_movement_coords_abs.connect(self.worker.move_robot_to_coordinate)
         self.send_robot_to_scan_init.connect(self.worker.move_robot_to_init_scan)
         self.send_robot_to_init.connect(self.worker.move_robot_to_init)
-        self.send_tool_plane.connect(self.worker.set_plane)
+        # self.send_tool_plane.connect(self.worker.set_plane)
         self.send_tool_rotation.connect(self.worker.rotate_pose_tool)
         self.worker.arrived_at_point.connect(self.scan_data_add_point)
         self.worker.began_movement.connect(self.robot_movement_started)
